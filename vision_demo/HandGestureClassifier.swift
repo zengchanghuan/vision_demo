@@ -48,35 +48,86 @@ struct HandGestureClassifier {
         let features: HandGestureFeatureVector
     }
 
+    /// 用于分类的统一特征向量（包含原始特征和派生特征ratio）
+    private struct GestureFeatures {
+        // 原始特征（使用原始值，因为统计量基于原始值）
+        let lenIndex: CGFloat
+        let lenMiddle: CGFloat
+        let lenRing: CGFloat
+        let lenLittle: CGFloat
+        let gapThumbIndex: CGFloat
+        let gapIndexMiddle: CGFloat
+        
+        // 派生特征（ratio）
+        let indexToMiddleRatio: CGFloat      // lenIndex / lenMiddle
+        let ringToMiddleRatio: CGFloat       // lenRing / lenMiddle
+        let littleToMiddleRatio: CGFloat     // lenLittle / lenMiddle
+    }
+
     // MARK: - 阈值配置
 
     /// 手势识别相关的阈值配置，统一管理便于调参
     private struct Constants {
-        // V 手势阈值
-        static let vIndexLongThreshold: CGFloat = 0.18      // 食指长度阈值（到手腕距离）
-        static let vMiddleLongThreshold: CGFloat = 0.18     // 中指长度阈值
-        static let vRingShortThreshold: CGFloat = 0.15      // 无名指"短"的阈值
-        static let vLittleShortThreshold: CGFloat = 0.15   // 小指"短"的阈值
-        static let vIndexMiddleGapMin: CGFloat = 0.08      // 食指与中指最小间距
-
-        // OK 手势阈值（归一化后，相对于手宽）
-        static let okLoopMaxGap: CGFloat = 0.35            // 拇指-食指最大间距（形成圆圈）
-        static let okThumbMinLength: CGFloat = 0.5         // 拇指最小长度（归一化）
-        static let okIndexMinLength: CGFloat = 0.5          // 食指最小长度（归一化）
-        static let okOthersShortRatio: CGFloat = 0.9        // 中指相对食指/中指的"短"比例（0.9 表示 < 90%）
-        static let okRingShortRatio: CGFloat = 0.8          // 无名指相对食指/中指的"短"比例
-        static let okLittleShortRatio: CGFloat = 0.8        // 小指相对食指/中指的"短"比例
-        static let okMaxStraightFingers: Int = 1            // 最多允许几根手指伸直（超过则更像张开掌）
-        static let okMinShortFingers: Int = 2               // 至少几根其他手指要"短"
-
-        // 张开手掌阈值（归一化后，相对于手宽）
-        static let openPalmFingerMinLength: CGFloat = 0.5   // 每根手指的最小长度
-        static let openPalmThumbIndexGapMin: CGFloat = 0.45 // 拇指-食指最小间距（明显分开）
-        static let openPalmIndexMiddleGapMin: CGFloat = 0.15 // 食指-中指最小间距
-        static let openPalmMiddleRingGapMin: CGFloat = 0.12  // 中指-无名指最小间距
-        static let openPalmRingLittleGapMin: CGFloat = 0.10  // 无名指-小指最小间距
-        static let openPalmMinStraightFingers: Int = 2       // 至少几根手指要伸直
-
+        // MARK: - 基于统计量的阈值结构体
+        
+        /// V 手势阈值（基于统计量：thumbIndexGap≈0.33, indexMiddleGap≈0.14, indexToMiddleRatio≈1.14等）
+        struct VThreshold {
+            // 基于V手势thumbIndexGap mean≈0.33、Palm mean≈0.18，取中间值0.25作为最小值
+            static let thumbIndexGapMin: CGFloat = 0.25
+            // 基于V手势indexMiddleGap mean≈0.14，Palm mean≈0.065，OK mean≈0.18，取0.10-0.19区间
+            static let indexMiddleGapMin: CGFloat = 0.10
+            static let indexMiddleGapMax: CGFloat = 0.19
+            // 基于V手势indexToMiddleRatio mean≈1.14，要求食指略长于中指
+            static let indexToMiddleRatioMin: CGFloat = 1.05
+            // 基于V手势ringToMiddleRatio mean≈0.40，要求无名指明显短于中指
+            static let ringToMiddleRatioMax: CGFloat = 0.60
+            // 基于V手势littleToMiddleRatio mean≈0.39，要求小指明显短于中指
+            static let littleToMiddleRatioMax: CGFloat = 0.60
+            // V手势通常是2根手指伸直（食指和中指）
+            static let maxStraightCount: Int = 3
+            static let minScore: Int = 4
+        }
+        
+        /// OK 手势阈值（基于统计量：thumbIndexGap≈0.043, indexToMiddleRatio≈0.70等）
+        struct OKThreshold {
+            // 基于OK手势thumbIndexGap mean≈0.043，Palm mean≈0.18，取中间值0.11作为最大值
+            static let thumbIndexGapMax: CGFloat = 0.11
+            // 基于OK手势indexMiddleGap mean≈0.18，V mean≈0.14，取略偏OK的值0.16
+            static let indexMiddleGapMin: CGFloat = 0.16
+            // 基于OK手势indexToMiddleRatio mean≈0.70，要求食指明显短于中指
+            static let indexToMiddleRatioMax: CGFloat = 0.90
+            // 基于OK手势ringToMiddleRatio mean≈0.89，要求无名指接近中指长度
+            static let ringToMiddleRatioMin: CGFloat = 0.75
+            // 基于OK手势littleToMiddleRatio mean≈0.77
+            static let littleToMiddleRatioMin: CGFloat = 0.60
+            // OK手势至少还有2根手指伸直（中指、无名指等）
+            static let minStraightCount: Int = 2
+            static let minScore: Int = 4
+        }
+        
+        /// 手掌张开阈值（基于统计量：thumbIndexGap≈0.18, indexToMiddleRatio≈1.02等）
+        struct PalmThreshold {
+            // 基于Palm手势thumbIndexGap mean≈0.18，V mean≈0.33，取0.13-0.25区间
+            static let thumbIndexGapMin: CGFloat = 0.13
+            static let thumbIndexGapMax: CGFloat = 0.25
+            // 基于Palm手势indexMiddleGap mean≈0.065，OK mean≈0.18，取0.05-0.10区间
+            static let indexMiddleGapMin: CGFloat = 0.05
+            static let indexMiddleGapMax: CGFloat = 0.10
+            // 基于Palm手势indexToMiddleRatio mean≈1.02，要求食指和中指差不多长
+            static let indexToMiddleRatioMin: CGFloat = 0.90
+            static let indexToMiddleRatioMax: CGFloat = 1.10
+            // 基于Palm手势ringToMiddleRatio mean≈0.91
+            static let ringToMiddleRatioMin: CGFloat = 0.80
+            // 基于Palm手势littleToMiddleRatio mean≈0.77
+            static let littleToMiddleRatioMin: CGFloat = 0.70
+            // 手掌张开四指都直
+            static let minStraightCount: Int = 4
+            static let minScore: Int = 4
+        }
+        
+        // 全局阈值
+        static let minAcceptScore: Int = 4  // 最低通过分数
+        
         // 通用阈值
         static let minConfidence: CGFloat = 0.3              // 关键点最小置信度
         static let fingerStraightAngleRad: CGFloat = .pi * 0.75  // 手指伸直的角度阈值（135°）
@@ -84,8 +135,29 @@ struct HandGestureClassifier {
 
     // MARK: - Debug 回调
 
+    /// 调试信息结构体
+    struct HandGestureDebugInfo {
+        let gesture: HandGestureType
+        let lenIndex: CGFloat
+        let lenMiddle: CGFloat
+        let lenRing: CGFloat
+        let lenLittle: CGFloat
+        let gapThumbIndex: CGFloat
+        let gapIndexMiddle: CGFloat
+        let indexToMiddleRatio: CGFloat
+        let ringToMiddleRatio: CGFloat
+        let littleToMiddleRatio: CGFloat
+        let straightCount: Int
+        let scoreV: Int
+        let scoreOK: Int
+        let scorePalm: Int
+    }
+
     /// 可选的调试日志回调，用于输出关键特征值
     var debugLogHandler: ((String) -> Void)?
+    
+    /// 可选的调试信息回调，用于UI显示
+    var debugInfoHandler: ((HandGestureDebugInfo) -> Void)?
 
     // MARK: - 特征提取
 
@@ -212,65 +284,211 @@ struct HandGestureClassifier {
         }
     }
 
+
+    /// 从HandGestureFeatureVector创建GestureFeatures（包含ratio计算）
+    /// - Parameter features: 原始特征向量
+    /// - Returns: GestureFeatures，如果lenMiddle太小（除0风险）返回nil
+    private func makeFeatures(from features: HandGestureFeatureVector) -> GestureFeatures? {
+        // 防止除0：如果lenMiddle太小，认为数据不可靠
+        guard features.lenMiddle > 0.001 else {
+            return nil
+        }
+        
+        return GestureFeatures(
+            lenIndex: features.lenIndex,
+            lenMiddle: features.lenMiddle,
+            lenRing: features.lenRing,
+            lenLittle: features.lenLittle,
+            gapThumbIndex: features.thumbIndexGap,
+            gapIndexMiddle: features.indexMiddleGap,
+            indexToMiddleRatio: features.lenIndex / features.lenMiddle,
+            ringToMiddleRatio: features.lenRing / features.lenMiddle,
+            littleToMiddleRatio: features.lenLittle / features.lenMiddle
+        )
+    }
+
+
+    // MARK: - 手势打分
+    
+    /// 为三个手势分别打分
+    /// - Parameters:
+    ///   - features: 特征向量
+    ///   - straightCount: 伸直手指数量
+    /// - Returns: (v分数, ok分数, palm分数)
+    private func scoreGestures(features: GestureFeatures, straightCount: Int) -> (v: Int, ok: Int, palm: Int) {
+        var scoreV = 0
+        var scoreOK = 0
+        var scorePalm = 0
+        
+        // V手势打分
+        if features.gapThumbIndex >= Constants.VThreshold.thumbIndexGapMin {
+            scoreV += 2  // 拇指食指间距较大（基于V mean≈0.33）
+        }
+        if features.gapIndexMiddle >= Constants.VThreshold.indexMiddleGapMin &&
+           features.gapIndexMiddle <= Constants.VThreshold.indexMiddleGapMax {
+            scoreV += 2  // 食指中指间距在合理区间（基于V mean≈0.14）
+        }
+        if features.indexToMiddleRatio >= Constants.VThreshold.indexToMiddleRatioMin {
+            scoreV += 1  // 食指略长于中指（基于V mean≈1.14）
+        }
+        if features.ringToMiddleRatio <= Constants.VThreshold.ringToMiddleRatioMax {
+            scoreV += 1  // 无名指明显短于中指（基于V mean≈0.40）
+        }
+        if features.littleToMiddleRatio <= Constants.VThreshold.littleToMiddleRatioMax {
+            scoreV += 1  // 小指明显短于中指（基于V mean≈0.39）
+        }
+        if straightCount <= Constants.VThreshold.maxStraightCount {
+            scoreV += 1  // 通常2根手指伸直
+        }
+        
+        // OK手势打分
+        if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax {
+            scoreOK += 2  // 拇指食指靠得很近（基于OK mean≈0.043）
+        }
+        if features.gapIndexMiddle >= Constants.OKThreshold.indexMiddleGapMin {
+            scoreOK += 2  // 食指弯成圈后和中指间距较大（基于OK mean≈0.18）
+        }
+        if features.indexToMiddleRatio <= Constants.OKThreshold.indexToMiddleRatioMax {
+            scoreOK += 1  // 食指明显变短（基于OK mean≈0.70）
+        }
+        if features.ringToMiddleRatio >= Constants.OKThreshold.ringToMiddleRatioMin {
+            scoreOK += 1  // 无名指比较直（基于OK mean≈0.89）
+        }
+        if features.littleToMiddleRatio >= Constants.OKThreshold.littleToMiddleRatioMin {
+            scoreOK += 1  // 小指比较直（基于OK mean≈0.77）
+        }
+        if straightCount >= Constants.OKThreshold.minStraightCount {
+            scoreOK += 1  // 至少还有2根手指伸直
+        }
+        
+        // 手掌张开打分
+        if features.gapThumbIndex >= Constants.PalmThreshold.thumbIndexGapMin &&
+           features.gapThumbIndex <= Constants.PalmThreshold.thumbIndexGapMax {
+            scorePalm += 2  // 拇指食指间距在合理区间（基于Palm mean≈0.18）
+        }
+        if features.gapIndexMiddle >= Constants.PalmThreshold.indexMiddleGapMin &&
+           features.gapIndexMiddle <= Constants.PalmThreshold.indexMiddleGapMax {
+            scorePalm += 2  // 食指中指间距较小（基于Palm mean≈0.065）
+        }
+        if features.indexToMiddleRatio >= Constants.PalmThreshold.indexToMiddleRatioMin &&
+           features.indexToMiddleRatio <= Constants.PalmThreshold.indexToMiddleRatioMax {
+            scorePalm += 1  // 食指和中指差不多长（基于Palm mean≈1.02）
+        }
+        if features.ringToMiddleRatio >= Constants.PalmThreshold.ringToMiddleRatioMin {
+            scorePalm += 1  // 无名指比较长（基于Palm mean≈0.91）
+        }
+        if features.littleToMiddleRatio >= Constants.PalmThreshold.littleToMiddleRatioMin {
+            scorePalm += 1  // 小指比较长（基于Palm mean≈0.77）
+        }
+        if straightCount >= Constants.PalmThreshold.minStraightCount {
+            scorePalm += 1  // 四指都直
+        }
+        
+        return (scoreV, scoreOK, scorePalm)
+    }
+
     // MARK: - 手势分类入口
 
-    /// 基于特征向量进行分类
+    /// 基于特征向量进行分类（使用多特征打分机制）
     /// - Parameter features: 特征向量
     /// - Returns: 识别的手势类型
     func classify(features: HandGestureFeatureVector) -> HandGestureType {
+        // 创建GestureFeatures（包含ratio计算）
+        guard let gestureFeatures = makeFeatures(from: features) else {
+            debugLogHandler?("未识别 ✗ | lenMiddle too small, cannot compute ratios")
+            return .unknown
+        }
+        
+        // 为三个手势打分
+        let scores = scoreGestures(features: gestureFeatures, straightCount: features.straightCount)
+        let (scoreV, scoreOK, scorePalm) = scores
+        
+        // 找出最高分
+        let maxScore = max(scoreV, scoreOK, scorePalm)
+        
+        // 如果最高分低于阈值，返回unknown
+        guard maxScore >= Constants.minAcceptScore else {
+            // 准备调试信息
+            var debugInfo: [String] = []
+            debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
+            debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
+            debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
+            debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
+            debugLogHandler?("未识别 ✗ | \(debugInfo.joined(separator: " | "))")
+            
+            // 构造调试信息
+            let debugInfo_obj = HandGestureDebugInfo(
+                gesture: .unknown,
+                lenIndex: gestureFeatures.lenIndex,
+                lenMiddle: gestureFeatures.lenMiddle,
+                lenRing: gestureFeatures.lenRing,
+                lenLittle: gestureFeatures.lenLittle,
+                gapThumbIndex: gestureFeatures.gapThumbIndex,
+                gapIndexMiddle: gestureFeatures.gapIndexMiddle,
+                indexToMiddleRatio: gestureFeatures.indexToMiddleRatio,
+                ringToMiddleRatio: gestureFeatures.ringToMiddleRatio,
+                littleToMiddleRatio: gestureFeatures.littleToMiddleRatio,
+                straightCount: features.straightCount,
+                scoreV: scoreV,
+                scoreOK: scoreOK,
+                scorePalm: scorePalm
+            )
+            debugInfoHandler?(debugInfo_obj)
+            
+            return .unknown
+        }
+        
+        // 按优先级选择：Palm > V > OK（保证手掌张开高精度）
+        let predicted: HandGestureType
+        if scorePalm == maxScore {
+            predicted = .openPalm
+        } else if scoreV == maxScore {
+            predicted = .vSign
+        } else {
+            predicted = .okSign
+        }
+        
         // 准备调试信息
         var debugInfo: [String] = []
         debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
         debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
-        debugInfo.append(String(format: "straightCnt:%d", features.straightCount))
-
-        // 按优先级检查手势：先 V，再 OK，最后张开手掌
-        // 优先级说明：V 手势特征最明显（两指长两指短），OK 手势需要排除（拇指食指接近），最后才是张开手掌
-
-        // 1. 检查 V 手势
-        if isVSign(lenIndex: features.lenIndex,
-                   lenMiddle: features.lenMiddle,
-                   lenRing: features.lenRing,
-                   lenLittle: features.lenLittle,
-                   indexMiddleGap: features.indexMiddleGap) {
-            debugLogHandler?("V手势 ✓ | \(debugInfo.joined(separator: " | "))")
-            return .vSign
+        debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
+        debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
+        
+        let gestureName: String
+        switch predicted {
+        case .vSign:
+            gestureName = "V手势"
+        case .okSign:
+            gestureName = "OK手势"
+        case .openPalm:
+            gestureName = "手掌张开"
+        default:
+            gestureName = "未知"
         }
-
-        // 2. 检查 OK 手势（更特殊的手势，优先级高于张开手掌）
-        if isOKSign(lenIndexNorm: features.lenIndexNorm,
-                    lenMiddleNorm: features.lenMiddleNorm,
-                    lenRingNorm: features.lenRingNorm,
-                    lenLittleNorm: features.lenLittleNorm,
-                    lenThumbNorm: features.lenThumbNorm,
-                    thumbIndexGapNorm: features.thumbIndexGapNorm,
-                    straightCount: features.straightCount) {
-            debugInfo.append(String(format: "lenThumbNorm:%.3f gapThumbIdxNorm:%.3f", features.lenThumbNorm, features.thumbIndexGapNorm))
-            debugLogHandler?("OK手势 ✓ | \(debugInfo.joined(separator: " | "))")
-            return .okSign
-        }
-
-        // 3. 检查手掌张开（需要排除 OK 手势的情况）
-        if isOpenPalm(lenIndexNorm: features.lenIndexNorm,
-                      lenMiddleNorm: features.lenMiddleNorm,
-                      lenRingNorm: features.lenRingNorm,
-                      lenLittleNorm: features.lenLittleNorm,
-                      lenThumbNorm: features.lenThumbNorm,
-                      indexMiddleGapNorm: features.indexMiddleGapNorm,
-                      thumbIndexGapNorm: features.thumbIndexGapNorm,
-                      middleRingGapNorm: features.middleRingGapNorm,
-                      ringLittleGapNorm: features.ringLittleGapNorm,
-                      straightCount: features.straightCount) {
-            debugInfo.append(String(format: "gapsNorm:%.3f,%.3f,%.3f,%.3f", features.thumbIndexGapNorm, features.indexMiddleGapNorm, features.middleRingGapNorm, features.ringLittleGapNorm))
-            debugLogHandler?("手掌张开 ✓ | \(debugInfo.joined(separator: " | "))")
-            return .openPalm
-        }
-
-        // 未识别
-        debugLogHandler?("未识别 ✗ | \(debugInfo.joined(separator: " | "))")
-        return .unknown
+        debugLogHandler?("\(gestureName) ✓ | \(debugInfo.joined(separator: " | "))")
+        
+        // 构造调试信息
+        let debugInfo_obj = HandGestureDebugInfo(
+            gesture: predicted,
+            lenIndex: gestureFeatures.lenIndex,
+            lenMiddle: gestureFeatures.lenMiddle,
+            lenRing: gestureFeatures.lenRing,
+            lenLittle: gestureFeatures.lenLittle,
+            gapThumbIndex: gestureFeatures.gapThumbIndex,
+            gapIndexMiddle: gestureFeatures.gapIndexMiddle,
+            indexToMiddleRatio: gestureFeatures.indexToMiddleRatio,
+            ringToMiddleRatio: gestureFeatures.ringToMiddleRatio,
+            littleToMiddleRatio: gestureFeatures.littleToMiddleRatio,
+            straightCount: features.straightCount,
+            scoreV: scoreV,
+            scoreOK: scoreOK,
+            scorePalm: scorePalm
+        )
+        debugInfoHandler?(debugInfo_obj)
+        
+        return predicted
     }
-
     /// 从 Vision 观察结果进行分类（保持原有接口）
     /// - Parameter observation: Vision 框架的手部姿态观察结果
     /// - Returns: 识别的手势类型
@@ -332,94 +550,6 @@ struct HandGestureClassifier {
                                   dip: VNRecognizedPoint) -> Bool {
         let rad = angle(mcp, pip, dip)
         return rad > Constants.fingerStraightAngleRad
-    }
 
-    // MARK: - 手势规则
-
-    /// ✌️ V 手势：食指 & 中指长，另外两指明显短，而且食指与中指间距较大
-    private func isVSign(
-        lenIndex: CGFloat,
-        lenMiddle: CGFloat,
-        lenRing: CGFloat,
-        lenLittle: CGFloat,
-        indexMiddleGap: CGFloat
-    ) -> Bool {
-        let indexLong   = lenIndex  > Constants.vIndexLongThreshold
-        let middleLong  = lenMiddle > Constants.vMiddleLongThreshold
-        let ringShort   = lenRing   < Constants.vRingShortThreshold
-        let littleShort = lenLittle < Constants.vLittleShortThreshold
-        let spreadBig   = indexMiddleGap > Constants.vIndexMiddleGapMin
-
-        return indexLong && middleLong && ringShort && littleShort && spreadBig
-    }
-
-    /// 👌 OK 手势：拇指和食指指尖非常接近，且两者都不算短
-    /// 关键特征：拇指和食指形成圆圈，其他三个手指应该相对较短（不是完全伸直）
-    private func isOKSign(
-        lenIndexNorm: CGFloat,
-        lenMiddleNorm: CGFloat,
-        lenRingNorm: CGFloat,
-        lenLittleNorm: CGFloat,
-        lenThumbNorm: CGFloat,
-        thumbIndexGapNorm: CGFloat,
-        straightCount: Int
-    ) -> Bool {
-        // 1. 拇指和食指形成一个很小的圈（归一化距离）
-        let thumbIndexClose = thumbIndexGapNorm < Constants.okLoopMaxGap
-
-        // 2. 拇指 & 食指不算很短（自然伸出）
-        let thumbLongEnough = lenThumbNorm > Constants.okThumbMinLength
-        let indexLongEnough = lenIndexNorm > Constants.okIndexMinLength
-
-        // 3. 其他三指不要"全部伸直"（否则更像张开掌）
-        let notAllOthersStraight = straightCount <= Constants.okMaxStraightFingers
-
-        // 4. 中/无名/小指相对短一点（和 index/中指比）
-        let indexRef = max(lenIndexNorm, lenMiddleNorm)
-        let middleRelShort = lenMiddleNorm < indexRef * Constants.okOthersShortRatio
-        let ringRelShort   = lenRingNorm   < indexRef * Constants.okRingShortRatio
-        let littleRelShort = lenLittleNorm < indexRef * Constants.okLittleShortRatio
-        let shortRelCount = [middleRelShort, ringRelShort, littleRelShort].filter { $0 }.count
-
-        return thumbIndexClose &&
-               thumbLongEnough &&
-               indexLongEnough &&
-               notAllOthersStraight &&
-               shortRelCount >= Constants.okMinShortFingers
-    }
-
-    /// 🖐 张开手掌：五根手指都伸得比较长，且指缝有一定间距
-    /// 关键特征：所有手指都长，且拇指和食指之间有明显间距（排除 OK 手势）
-    private func isOpenPalm(
-        lenIndexNorm: CGFloat,
-        lenMiddleNorm: CGFloat,
-        lenRingNorm: CGFloat,
-        lenLittleNorm: CGFloat,
-        lenThumbNorm: CGFloat,
-        indexMiddleGapNorm: CGFloat,
-        thumbIndexGapNorm: CGFloat,
-        middleRingGapNorm: CGFloat,
-        ringLittleGapNorm: CGFloat,
-        straightCount: Int
-    ) -> Bool {
-        // 1. 多根手指伸直
-        let enoughStraightFingers = straightCount >= Constants.openPalmMinStraightFingers
-
-        // 2. 整体都不短（相对 handWidth）
-        let allLong = lenIndexNorm  > Constants.openPalmFingerMinLength &&
-                      lenMiddleNorm > Constants.openPalmFingerMinLength &&
-                      lenRingNorm   > Constants.openPalmFingerMinLength &&
-                      lenLittleNorm > Constants.openPalmFingerMinLength &&
-                      lenThumbNorm  > Constants.openPalmFingerMinLength
-
-        // 3. 拇指和食指明显分开
-        let thumbIndexSpread = thumbIndexGapNorm > Constants.openPalmThumbIndexGapMin
-
-        // 4. 其他指缝也有"张开"感觉
-        let otherSpread = indexMiddleGapNorm > Constants.openPalmIndexMiddleGapMin &&
-                          middleRingGapNorm  > Constants.openPalmMiddleRingGapMin &&
-                          ringLittleGapNorm  > Constants.openPalmRingLittleGapMin
-
-        return enoughStraightFingers && allLong && thumbIndexSpread && otherSpread
     }
 }

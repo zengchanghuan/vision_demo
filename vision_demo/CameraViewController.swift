@@ -18,6 +18,22 @@ final class CameraViewController: UIViewController {
         return label
     }()
 
+    /// 调试信息显示Label（多行）
+    private let debugLabel: UILabel = {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.4)
+        label.layer.cornerRadius = 8
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.text = "等待识别..."
+        return label
+    }()
+
+    /// Debug开关状态
+    private var isDebugEnabled = true
+
     // MARK: - Camera & Vision
 
     private let captureSession = AVCaptureSession()
@@ -142,6 +158,7 @@ final class CameraViewController: UIViewController {
         view.backgroundColor = .black
         setupPreviewLayer()
         setupGestureLabel()
+        setupDebugUI()
         setupDebugLogging()
         if isTuningModeEnabled {
             setupTuningPanel()
@@ -161,6 +178,16 @@ final class CameraViewController: UIViewController {
             height: 44
         )
 
+        // 布局debugLabel（在gestureLabel下方）
+        if isDebugEnabled {
+            debugLabel.frame = CGRect(
+                x: 16,
+                y: gestureLabel.frame.maxY + 8,
+                width: view.bounds.width - 32,
+                height: min(120, view.bounds.height - gestureLabel.frame.maxY - 200)
+            )
+        }
+
         if isTuningModeEnabled {
             layoutTuningPanel()
         }
@@ -176,6 +203,20 @@ final class CameraViewController: UIViewController {
 
     private func setupGestureLabel() {
         view.addSubview(gestureLabel)
+    }
+
+    /// 设置调试UI
+    private func setupDebugUI() {
+        view.addSubview(debugLabel)
+        debugLabel.isHidden = !isDebugEnabled
+
+        // 添加Debug开关按钮（右上角）
+        navigationItem.rightBarButtonItem = UIBarButtonItem(
+            title: "Debug",
+            style: .plain,
+            target: self,
+            action: #selector(toggleDebug)
+        )
     }
 
     /// 设置调参面板UI
@@ -224,10 +265,46 @@ final class CameraViewController: UIViewController {
     /// 设置调试日志输出（仅在 DEBUG 模式下启用）
     private func setupDebugLogging() {
         #if DEBUG
-        classifier.debugLogHandler = { [weak self] message in
+        classifier.debugLogHandler = { message in
             print("[HandGestureDebug]", message)
         }
         #endif
+
+        // 设置调试信息回调，用于UI显示
+        classifier.debugInfoHandler = { [weak self] info in
+            DispatchQueue.main.async {
+                self?.updateDebugUI(with: info)
+            }
+        }
+    }
+
+    /// 切换Debug显示
+    @objc private func toggleDebug() {
+        isDebugEnabled.toggle()
+        debugLabel.isHidden = !isDebugEnabled
+
+        if isDebugEnabled {
+            classifier.debugInfoHandler = { [weak self] info in
+                DispatchQueue.main.async {
+                    self?.updateDebugUI(with: info)
+                }
+            }
+        } else {
+            classifier.debugInfoHandler = nil
+        }
+    }
+
+    /// 更新调试UI显示
+    private func updateDebugUI(with info: HandGestureClassifier.HandGestureDebugInfo) {
+        guard isDebugEnabled else { return }
+
+        var lines: [String] = []
+        lines.append("Gesture: \(info.gesture.rawValue) (V/OK/Palm = \(info.scoreV) / \(info.scoreOK) / \(info.scorePalm))")
+        lines.append("gaps:  thumb-index = \(String(format: "%.3f", info.gapThumbIndex)), index-middle = \(String(format: "%.3f", info.gapIndexMiddle))")
+        lines.append("ratios: idx/mid = \(String(format: "%.2f", info.indexToMiddleRatio)), ring/mid = \(String(format: "%.2f", info.ringToMiddleRatio)), lit/mid = \(String(format: "%.2f", info.littleToMiddleRatio))")
+        lines.append("straightCount = \(info.straightCount)")
+
+        debugLabel.text = lines.joined(separator: "\n")
     }
 
     // MARK: - Camera
