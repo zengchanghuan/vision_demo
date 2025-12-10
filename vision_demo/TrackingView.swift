@@ -16,7 +16,9 @@ class TrackingView: UIView {
     
     /// 更新跟踪框
     /// - Parameter rect: 归一化坐标的矩形 (0~1)
-    func updateTrackingRect(_ rect: CGRect, color: UIColor = .green) {
+    /// - Parameter color: 边框颜色
+    /// - Parameter isDashed: 是否使用虚线
+    func updateTrackingRect(_ rect: CGRect, color: UIColor = .green, isDashed: Bool = false) {
         // 移除旧的层
         trackingLayer?.removeFromSuperlayer()
         
@@ -40,8 +42,10 @@ class TrackingView: UIView {
         layer.lineCap = .round
         layer.lineJoin = .round
         
-        // 添加虚线效果（可选）
-        // layer.lineDashPattern = [4, 4]
+        // 添加虚线效果
+        if isDashed {
+            layer.lineDashPattern = [6, 4]
+        }
         
         self.layer.addSublayer(layer)
         trackingLayer = layer

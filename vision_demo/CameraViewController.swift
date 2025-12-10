@@ -251,7 +251,7 @@ final class CameraViewController: UIViewController {
         // 配置人脸检测回调
         faceDetector.onFaceDetected = { [weak self] rect in
             DispatchQueue.main.async {
-                self?.trackingView.updateTrackingRect(rect, color: .yellow)
+                self?.trackingView.updateTrackingRect(rect, color: .yellow, isDashed: true)
                 self?.gestureLabel.text = "检测到人脸"
             }
         }
