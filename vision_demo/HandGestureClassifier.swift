@@ -57,7 +57,7 @@ struct HandGestureClassifier {
         let lenLittle: CGFloat
         let gapThumbIndex: CGFloat
         let gapIndexMiddle: CGFloat
-        
+
         // 派生特征（ratio）
         let indexToMiddleRatio: CGFloat      // lenIndex / lenMiddle
         let ringToMiddleRatio: CGFloat       // lenRing / lenMiddle
@@ -69,7 +69,7 @@ struct HandGestureClassifier {
     /// 手势识别相关的阈值配置，统一管理便于调参
     private struct Constants {
         // MARK: - 基于统计量的阈值结构体
-        
+
         /// V 手势阈值（基于统计量：thumbIndexGap≈0.33, indexMiddleGap≈0.14, indexToMiddleRatio≈1.14等）
         struct VThreshold {
             // 基于V手势thumbIndexGap mean≈0.33、Palm mean≈0.18，取中间值0.25作为最小值
@@ -87,7 +87,7 @@ struct HandGestureClassifier {
             static let maxStraightCount: Int = 3
             static let minScore: Int = 4
         }
-        
+
         /// OK 手势阈值（基于统计量：thumbIndexGap≈0.043, indexToMiddleRatio≈0.70等）
         struct OKThreshold {
             // 基于OK手势thumbIndexGap mean≈0.043，Palm mean≈0.18，取中间值0.11作为最大值
@@ -104,7 +104,7 @@ struct HandGestureClassifier {
             static let minStraightCount: Int = 2
             static let minScore: Int = 4
         }
-        
+
         /// 手掌张开阈值（基于统计量：thumbIndexGap≈0.18, indexToMiddleRatio≈1.02等）
         struct PalmThreshold {
             // 基于Palm手势thumbIndexGap mean≈0.18，V mean≈0.33，取0.13-0.25区间
@@ -124,10 +124,10 @@ struct HandGestureClassifier {
             static let minStraightCount: Int = 4
             static let minScore: Int = 4
         }
-        
+
         // 全局阈值
         static let minAcceptScore: Int = 4  // 最低通过分数
-        
+
         // 通用阈值
         static let minConfidence: CGFloat = 0.3              // 关键点最小置信度
         static let fingerStraightAngleRad: CGFloat = .pi * 0.75  // 手指伸直的角度阈值（135°）
@@ -155,7 +155,7 @@ struct HandGestureClassifier {
 
     /// 可选的调试日志回调，用于输出关键特征值
     var debugLogHandler: ((String) -> Void)?
-    
+
     /// 可选的调试信息回调，用于UI显示
     var debugInfoHandler: ((HandGestureDebugInfo) -> Void)?
 
@@ -293,7 +293,7 @@ struct HandGestureClassifier {
         guard features.lenMiddle > 0.001 else {
             return nil
         }
-        
+
         return GestureFeatures(
             lenIndex: features.lenIndex,
             lenMiddle: features.lenMiddle,
@@ -309,7 +309,7 @@ struct HandGestureClassifier {
 
 
     // MARK: - 手势打分
-    
+
     /// 为三个手势分别打分
     /// - Parameters:
     ///   - features: 特征向量
@@ -319,7 +319,7 @@ struct HandGestureClassifier {
         var scoreV = 0
         var scoreOK = 0
         var scorePalm = 0
-        
+
         // V手势打分
         if features.gapThumbIndex >= Constants.VThreshold.thumbIndexGapMin {
             scoreV += 2  // 拇指食指间距较大（基于V mean≈0.33）
@@ -340,7 +340,7 @@ struct HandGestureClassifier {
         if straightCount <= Constants.VThreshold.maxStraightCount {
             scoreV += 1  // 通常2根手指伸直
         }
-        
+
         // OK手势打分
         if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax {
             scoreOK += 2  // 拇指食指靠得很近（基于OK mean≈0.043）
@@ -360,7 +360,7 @@ struct HandGestureClassifier {
         if straightCount >= Constants.OKThreshold.minStraightCount {
             scoreOK += 1  // 至少还有2根手指伸直
         }
-        
+
         // 手掌张开打分
         if features.gapThumbIndex >= Constants.PalmThreshold.thumbIndexGapMin &&
            features.gapThumbIndex <= Constants.PalmThreshold.thumbIndexGapMax {
@@ -383,7 +383,7 @@ struct HandGestureClassifier {
         if straightCount >= Constants.PalmThreshold.minStraightCount {
             scorePalm += 1  // 四指都直
         }
-        
+
         return (scoreV, scoreOK, scorePalm)
     }
 
@@ -398,14 +398,14 @@ struct HandGestureClassifier {
             debugLogHandler?("未识别 ✗ | lenMiddle too small, cannot compute ratios")
             return .unknown
         }
-        
+
         // 为三个手势打分
         let scores = scoreGestures(features: gestureFeatures, straightCount: features.straightCount)
         let (scoreV, scoreOK, scorePalm) = scores
-        
+
         // 找出最高分
         let maxScore = max(scoreV, scoreOK, scorePalm)
-        
+
         // 如果最高分低于阈值，返回unknown
         guard maxScore >= Constants.minAcceptScore else {
             // 准备调试信息
@@ -415,7 +415,7 @@ struct HandGestureClassifier {
             debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
             debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
             debugLogHandler?("未识别 ✗ | \(debugInfo.joined(separator: " | "))")
-            
+
             // 构造调试信息
             let debugInfo_obj = HandGestureDebugInfo(
                 gesture: .unknown,
@@ -434,40 +434,40 @@ struct HandGestureClassifier {
                 scorePalm: scorePalm
             )
             debugInfoHandler?(debugInfo_obj)
-            
+
             return .unknown
         }
-        
+
         // 按优先级选择：Palm > V > OK（保证手掌张开高精度）
         let predicted: HandGestureType
         if scorePalm == maxScore {
-            predicted = .openPalm
+            predicted = .palm
         } else if scoreV == maxScore {
             predicted = .vSign
         } else {
             predicted = .okSign
         }
-        
+
         // 准备调试信息
         var debugInfo: [String] = []
         debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
         debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
         debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
         debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
-        
+
         let gestureName: String
         switch predicted {
         case .vSign:
             gestureName = "V手势"
         case .okSign:
             gestureName = "OK手势"
-        case .openPalm:
+        case .palm:
             gestureName = "手掌张开"
         default:
             gestureName = "未知"
         }
         debugLogHandler?("\(gestureName) ✓ | \(debugInfo.joined(separator: " | "))")
-        
+
         // 构造调试信息
         let debugInfo_obj = HandGestureDebugInfo(
             gesture: predicted,
@@ -486,7 +486,7 @@ struct HandGestureClassifier {
             scorePalm: scorePalm
         )
         debugInfoHandler?(debugInfo_obj)
-        
+
         return predicted
     }
     /// 从 Vision 观察结果进行分类（保持原有接口）

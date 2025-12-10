@@ -465,10 +465,10 @@ final class CameraViewController: UIViewController {
         switch mostFrequentGesture {
         case .okSign:
             threshold = 0.9  // OK 手势需要 90% 的帧一致才算稳定
-        case .vSign, .openPalm:
+        case .vSign, .palm:
             threshold = 0.75  // V 手势和张开手掌需要 75% 的帧一致
-        case .unknown:
-            threshold = 0.0  // unknown 直接返回
+        default:
+            threshold = 0.0  // unknown 或其他未处理手势
         }
 
         // 只有当占比超过阈值时，才认为手势稳定
@@ -495,9 +495,9 @@ final class CameraViewController: UIViewController {
                 self.gestureLabel.text = "识别到：✌️ V 手势"
             case .okSign:
                 self.gestureLabel.text = "识别到：👌 OK 手势"
-            case .openPalm:
+            case .palm:
                 self.gestureLabel.text = "识别到：🖐 手掌张开"
-            case .unknown, .none:
+            default:
                 self.gestureLabel.text = "请把手伸到镜头前（V / OK / 张开）"
             }
         }
@@ -515,7 +515,7 @@ final class CameraViewController: UIViewController {
         case 2:
             currentGroundTruthGesture = .okSign
         case 3:
-            currentGroundTruthGesture = .openPalm
+            currentGroundTruthGesture = .palm
         default:
             currentGroundTruthGesture = .unknown
         }
