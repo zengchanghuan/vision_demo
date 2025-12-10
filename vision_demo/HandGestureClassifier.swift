@@ -90,19 +90,19 @@ struct HandGestureClassifier {
 
         /// OK 手势阈值（基于统计量：thumbIndexGap≈0.043, indexToMiddleRatio≈0.70等）
         struct OKThreshold {
-            // 基于OK手势thumbIndexGap mean≈0.043，Palm mean≈0.18，取中间值0.11作为最大值
-            static let thumbIndexGapMax: CGFloat = 0.11
+            /// OK 时拇指和食指几乎相接，这里把上限从 0.11 收紧到 0.08
+            static let thumbIndexGapMax: CGFloat = 0.08
             // 基于OK手势indexMiddleGap mean≈0.18，V mean≈0.14，取略偏OK的值0.16
             static let indexMiddleGapMin: CGFloat = 0.16
-            // 基于OK手势indexToMiddleRatio mean≈0.70，要求食指明显短于中指
-            static let indexToMiddleRatioMax: CGFloat = 0.90
+            /// OK 时食指要明显短于中指，把上限从 0.90 收紧到 0.85
+            static let indexToMiddleRatioMax: CGFloat = 0.85
             // 基于OK手势ringToMiddleRatio mean≈0.89，要求无名指接近中指长度
-            static let ringToMiddleRatioMin: CGFloat = 0.75
+            static let ringToMiddleRatioMin: CGFloat = 0.90
             // 基于OK手势littleToMiddleRatio mean≈0.77
-            static let littleToMiddleRatioMin: CGFloat = 0.60
-            // OK手势至少还有2根手指伸直（中指、无名指等）
-            static let minStraightCount: Int = 2
-            static let minScore: Int = 4
+            static let littleToMiddleRatioMin: CGFloat = 0.85
+            // OK手势至少还有3根手指伸直（中指、无名指等）
+            static let minStraightCount: Int = 3
+            static let minScore: Int = 3
         }
 
         /// 手掌张开阈值（基于统计量：thumbIndexGap≈0.18, indexToMiddleRatio≈1.02等）
@@ -161,6 +161,8 @@ struct HandGestureClassifier {
         // 通用阈值
         static let minConfidence: CGFloat = 0.3              // 关键点最小置信度
         static let fingerStraightAngleRad: CGFloat = .pi * 0.75  // 手指伸直的角度阈值（135°）
+        /// 平均指长太小说明手还没真正举到画面中，直接视作 unknown，避免凭噪声判成"食指"
+        static let minAvgFingerLengthForValidHand: CGFloat = 0.02
     }
 
     // MARK: - Debug 回调
@@ -413,7 +415,15 @@ struct HandGestureClassifier {
         }
         
         if straightCount >= Constants.OKThreshold.minStraightCount {
-            scoreOK += 1  // 至少还有2根手指伸直
+            scoreOK += 1  // 至少还有3根手指伸直
+        }
+
+        // 新增：如果整体更像"手掌张开"（食指不短 + 拇指张得很开），给 OK 一个惩罚，避免和手掌混淆
+        // 日志中这类帧的典型特征：
+        //  - indexToMiddleRatio ≈ 1.05 ~ 1.15
+        //  - gapThumbIndex    ≈ 0.10 以上
+        if features.indexToMiddleRatio > 0.95 && features.gapThumbIndex > 0.07 {
+            scoreOK -= 2
         }
 
         // 手掌张开打分
@@ -518,6 +528,27 @@ struct HandGestureClassifier {
         // 创建GestureFeatures（包含ratio计算）
         guard let gestureFeatures = makeFeatures(from: features) else {
             debugLogHandler?("未识别 ✗ | lenMiddle too small, cannot compute ratios")
+            return .unknown
+        }
+
+        // 先做一层"是否真的有手"的过滤：
+        // 如果四个手指长度的平均值非常小，说明手还没举到画面里，
+        // 此时很多比值特征会非常不稳定，容易被误判为"食指"。
+        let avgLen = (gestureFeatures.lenIndex
+                      + gestureFeatures.lenMiddle
+                      + gestureFeatures.lenRing
+                      + gestureFeatures.lenLittle) / 4.0
+        if avgLen < Constants.minAvgFingerLengthForValidHand {
+            debugLogHandler?(
+                String(
+                    format: "[HandGestureDebug] 无效手势(平均指长过小) | lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f avgLen:%.3f",
+                    gestureFeatures.lenIndex,
+                    gestureFeatures.lenMiddle,
+                    gestureFeatures.lenRing,
+                    gestureFeatures.lenLittle,
+                    avgLen
+                )
+            )
             return .unknown
         }
 
