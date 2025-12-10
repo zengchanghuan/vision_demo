@@ -64,8 +64,10 @@ final class CameraViewController: UIViewController {
 
     private var currentMode: DetectionMode = .handGesture {
         didSet {
-            updateUIForMode()
+            // 先重置所有追踪器，防止旧模式的回调干扰
             resetTrackers()
+            // 再更新UI并启动新模式所需的追踪器
+            updateUIForMode()
         }
     }
 
