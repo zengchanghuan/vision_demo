@@ -49,11 +49,12 @@ class FaceDetector {
 
     /// 在视频帧中执行人脸检测
     /// - Parameter pixelBuffer: 视频帧的像素缓冲区
-    func detectFaces(in pixelBuffer: CVPixelBuffer) {
+    /// - Parameter orientation: 图像方向
+    func detectFaces(in pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation = .up) {
         guard isEnabled, let request = faceDetectionRequest else { return }
-
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-
+        
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+        
         do {
             try handler.perform([request])
         } catch {
@@ -65,25 +66,18 @@ class FaceDetector {
 
     /// 处理人脸检测结果
     private func handleFaceDetectionResults(request: VNRequest) {
-        guard let results = request.results as? [VNFaceObservation], !results.isEmpty else {
+        guard
+            let results = request.results as? [VNFaceObservation],
+            let faceObservation = results.first
+        else {
             onNoFaceDetected?()
             return
         }
 
-        // 取第一个检测到的人脸
-        let faceObservation = results[0]
+        // 直接把 Vision 的 normalized boundingBox 往外抛
+        // 0~1 之间的归一化坐标，后面交给 AVCaptureVideoPreviewLayer 去转换
         let boundingBox = faceObservation.boundingBox
-
-        // Vision框架使用归一化坐标（原点在左下角）
-        // 转换为UIKit坐标系（原点在左上角）
-        let rect = CGRect(
-            x: boundingBox.minX,
-            y: 1 - boundingBox.minY - boundingBox.height,  // 翻转Y轴
-            width: boundingBox.width,
-            height: boundingBox.height
-        )
-
-        onFaceDetected?(rect)
+        onFaceDetected?(boundingBox)
     }
 }
 
