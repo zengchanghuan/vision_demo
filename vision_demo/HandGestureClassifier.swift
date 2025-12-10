@@ -163,6 +163,35 @@ struct HandGestureClassifier {
         static let fingerStraightAngleRad: CGFloat = .pi * 0.75  // 手指伸直的角度阈值（135°）
         /// 平均指长太小说明手还没真正举到画面中，直接视作 unknown，避免凭噪声判成"食指"
         static let minAvgFingerLengthForValidHand: CGFloat = 0.02
+        
+        // MARK: - 手势置信度阈值和margin配置
+        
+        /// 每种手势的最低分数阈值（低于此阈值返回 unknown）
+        struct GestureThreshold {
+            static let vSign: Int = 5
+            static let okSign: Int = 4
+            static let palm: Int = 5
+            static let fist: Int = 5
+            static let indexFinger: Int = 5
+        }
+        
+        /// 每种手势与第二高分的最小差距（低于此差距说明不够稳定，返回 unknown）
+        struct GestureMargin {
+            static let vSign: Int = 2
+            static let okSign: Int = 2
+            static let palm: Int = 2
+            static let fist: Int = 2
+            static let indexFinger: Int = 2
+        }
+        
+        // MARK: - 连续帧稳定判决配置
+        
+        /// 连续帧稳定判决的队列长度
+        static let stabilityQueueLength: Int = 8
+        /// 连续帧中某手势出现的最小次数（绝对值）
+        static let minOccurrences: Int = 3
+        /// 连续帧中某手势出现的最小比例（相对于非unknown的有效帧）
+        static let minOccurrenceRatio: CGFloat = 0.6
     }
 
     // MARK: - Debug 回调
@@ -192,6 +221,72 @@ struct HandGestureClassifier {
 
     /// 可选的调试信息回调，用于UI显示
     var debugInfoHandler: ((HandGestureDebugInfo) -> Void)?
+    
+    // MARK: - 连续帧稳定判决
+    
+    /// 连续帧稳定判决器
+    private class StabilityFilter {
+        private var recentPredictions: [HandGestureType] = []
+        private var currentOutput: HandGestureType = .unknown
+        private let maxLength: Int
+        private let minOccurrences: Int
+        private let minRatio: CGFloat
+        
+        init(maxLength: Int, minOccurrences: Int, minRatio: CGFloat) {
+            self.maxLength = maxLength
+            self.minOccurrences = minOccurrences
+            self.minRatio = minRatio
+        }
+        
+        /// 添加新的预测结果并返回稳定的输出
+        func addPrediction(_ gesture: HandGestureType) -> HandGestureType {
+            // 添加到队列
+            recentPredictions.append(gesture)
+            if recentPredictions.count > maxLength {
+                recentPredictions.removeFirst()
+            }
+            
+            // 统计非 unknown 的手势分布
+            let validGestures = recentPredictions.filter { $0 != .unknown }
+            guard !validGestures.isEmpty else {
+                return currentOutput  // 全是 unknown，保持上一帧输出
+            }
+            
+            // 统计每种手势的出现次数
+            var counts: [HandGestureType: Int] = [:]
+            for gesture in validGestures {
+                counts[gesture, default: 0] += 1
+            }
+            
+            // 找出出现次数最多的手势
+            guard let (mostFrequent, count) = counts.max(by: { $0.value < $1.value }) else {
+                return currentOutput
+            }
+            
+            // 检查是否满足稳定条件
+            let validCount = validGestures.count
+            let ratio = CGFloat(count) / CGFloat(validCount)
+            
+            if count >= minOccurrences && ratio >= minRatio {
+                currentOutput = mostFrequent
+            }
+            // 否则保持上一帧输出
+            
+            return currentOutput
+        }
+        
+        /// 重置状态
+        func reset() {
+            recentPredictions.removeAll()
+            currentOutput = .unknown
+        }
+    }
+    
+    private var stabilityFilter = StabilityFilter(
+        maxLength: Constants.stabilityQueueLength,
+        minOccurrences: Constants.minOccurrences,
+        minRatio: Constants.minOccurrenceRatio
+    )
 
     // MARK: - 特征提取
 
@@ -556,56 +651,52 @@ struct HandGestureClassifier {
         let scores = scoreGestures(features: gestureFeatures, straightCount: features.straightCount)
         let (scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger) = scores
 
-        // 找出最高分
-        let maxScore = max(scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger)
-
-        // 如果最高分低于阈值，返回unknown
-        guard maxScore >= Constants.minAcceptScore else {
-            // 准备调试信息
-            var debugInfo: [String] = []
-            debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
-            debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
-            debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
-            debugInfo.append(String(format: "score V/OK/Palm/Fist/Idx = %d/%d/%d/%d/%d", scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger))
-            debugLogHandler?("未识别 ✗ | \(debugInfo.joined(separator: " | "))")
-
-            // 构造调试信息
-            let debugInfo_obj = HandGestureDebugInfo(
-                gesture: .unknown,
-                lenIndex: gestureFeatures.lenIndex,
-                lenMiddle: gestureFeatures.lenMiddle,
-                lenRing: gestureFeatures.lenRing,
-                lenLittle: gestureFeatures.lenLittle,
-                gapThumbIndex: gestureFeatures.gapThumbIndex,
-                gapIndexMiddle: gestureFeatures.gapIndexMiddle,
-                indexToMiddleRatio: gestureFeatures.indexToMiddleRatio,
-                ringToMiddleRatio: gestureFeatures.ringToMiddleRatio,
-                littleToMiddleRatio: gestureFeatures.littleToMiddleRatio,
-                straightCount: features.straightCount,
-                scoreV: scoreV,
-                scoreOK: scoreOK,
-                scorePalm: scorePalm,
-                scoreFist: scoreFist,
-                scoreIndexFinger: scoreIndexFinger
-            )
-            debugInfoHandler?(debugInfo_obj)
-
-            return .unknown
+        // 创建分数数组用于排序
+        let scoreArray: [(HandGestureType, Int)] = [
+            (.vSign, scoreV),
+            (.okSign, scoreOK),
+            (.palm, scorePalm),
+            (.fist, scoreFist),
+            (.indexFinger, scoreIndexFinger)
+        ]
+        
+        // 按分数降序排序
+        let sortedScores = scoreArray.sorted { $0.1 > $1.1 }
+        let (bestGesture, bestScore) = sortedScores[0]
+        let secondScore = sortedScores[1].1
+        
+        // 获取最佳手势的阈值和margin
+        let threshold: Int
+        let margin: Int
+        
+        switch bestGesture {
+        case .vSign:
+            threshold = Constants.GestureThreshold.vSign
+            margin = Constants.GestureMargin.vSign
+        case .okSign:
+            threshold = Constants.GestureThreshold.okSign
+            margin = Constants.GestureMargin.okSign
+        case .palm:
+            threshold = Constants.GestureThreshold.palm
+            margin = Constants.GestureMargin.palm
+        case .fist:
+            threshold = Constants.GestureThreshold.fist
+            margin = Constants.GestureMargin.fist
+        case .indexFinger:
+            threshold = Constants.GestureThreshold.indexFinger
+            margin = Constants.GestureMargin.indexFinger
+        default:
+            threshold = Constants.minAcceptScore
+            margin = 2
         }
-
-        // 按优先级选择最高分的手势
+        
+        // 检查是否满足阈值和margin条件
         let predicted: HandGestureType
-        if scoreIndexFinger == maxScore {
-            predicted = .indexFinger
-        } else if scoreFist == maxScore {
-            predicted = .fist
-        } else if scoreV == maxScore {
-            predicted = .vSign
-        } else if scoreOK == maxScore {
-            // 当 OK 和 Palm 打平时，优先认为是 OK 手势
-            predicted = .okSign
+        if bestScore < threshold || (bestScore - secondScore) < margin {
+            // 不满足条件，返回 unknown
+            predicted = .unknown
         } else {
-            predicted = .palm
+            predicted = bestGesture
         }
 
         // 准备调试信息
@@ -655,6 +746,20 @@ struct HandGestureClassifier {
 
         return predicted
     }
+    
+    /// 基于特征向量进行分类（带连续帧稳定判决）
+    /// - Parameter features: 特征向量
+    /// - Returns: 稳定后的识别手势类型
+    mutating func classifyWithStability(features: HandGestureFeatureVector) -> HandGestureType {
+        let rawPrediction = classify(features: features)
+        return stabilityFilter.addPrediction(rawPrediction)
+    }
+    
+    /// 重置连续帧稳定判决器
+    mutating func resetStability() {
+        stabilityFilter.reset()
+    }
+    
     /// 从 Vision 观察结果进行分类（保持原有接口）
     /// - Parameter observation: Vision 框架的手部姿态观察结果
     /// - Returns: 识别的手势类型
@@ -717,5 +822,139 @@ struct HandGestureClassifier {
         let rad = angle(mcp, pip, dip)
         return rad > Constants.fingerStraightAngleRad
 
+    }
+}
+
+// MARK: - 统计与标定相关结构体
+
+/// 单帧手势特征的统计样本
+struct GestureSample {
+    let lenIndex: CGFloat
+    let lenMiddle: CGFloat
+    let lenRing: CGFloat
+    let lenLittle: CGFloat
+    let gapThumbIndex: CGFloat
+    let gapIndexMiddle: CGFloat
+    let indexToMiddleRatio: CGFloat
+    let ringToMiddleRatio: CGFloat
+    let littleToMiddleRatio: CGFloat
+    let straightCount: Int
+    let scoreV: Int
+    let scoreOK: Int
+    let scorePalm: Int
+    let scoreFist: Int
+    let scoreIndexFinger: Int
+}
+
+/// 某个特征的统计结果
+struct FeatureStats {
+    let min: CGFloat
+    let max: CGFloat
+    let mean: CGFloat
+    let count: Int
+}
+
+/// 手势标定会话
+class CalibrationSession {
+    let targetGesture: HandGestureType
+    private(set) var samples: [GestureSample] = []
+    private(set) var isRecording: Bool = false
+    
+    init(targetGesture: HandGestureType) {
+        self.targetGesture = targetGesture
+    }
+    
+    /// 开始采样
+    func startRecording() {
+        samples.removeAll()
+        isRecording = true
+    }
+    
+    /// 停止采样
+    func stopRecording() {
+        isRecording = false
+    }
+    
+    /// 添加一帧样本
+    func addSample(_ sample: GestureSample) {
+        guard isRecording else { return }
+        samples.append(sample)
+    }
+    
+    /// 计算统计结果
+    func computeStats() -> [String: FeatureStats] {
+        guard !samples.isEmpty else { return [:] }
+        
+        var stats: [String: FeatureStats] = [:]
+        
+        // 计算各个特征的统计量
+        let features: [(String, (GestureSample) -> CGFloat)] = [
+            ("lenIndex", { $0.lenIndex }),
+            ("lenMiddle", { $0.lenMiddle }),
+            ("lenRing", { $0.lenRing }),
+            ("lenLittle", { $0.lenLittle }),
+            ("gapThumbIndex", { $0.gapThumbIndex }),
+            ("gapIndexMiddle", { $0.gapIndexMiddle }),
+            ("indexToMiddleRatio", { $0.indexToMiddleRatio }),
+            ("ringToMiddleRatio", { $0.ringToMiddleRatio }),
+            ("littleToMiddleRatio", { $0.littleToMiddleRatio })
+        ]
+        
+        for (name, extractor) in features {
+            let values = samples.map { extractor($0) }
+            let min = values.min() ?? 0
+            let max = values.max() ?? 0
+            let mean = values.reduce(0, +) / CGFloat(values.count)
+            stats[name] = FeatureStats(min: min, max: max, mean: mean, count: values.count)
+        }
+        
+        return stats
+    }
+    
+    /// 生成统计摘要字符串（用于控制台输出）
+    func generateSummary() -> String {
+        let stats = computeStats()
+        guard !stats.isEmpty else { return "No samples collected" }
+        
+        var summary = "\n===== Calibration Summary for \(targetGesture) =====\n"
+        summary += "Total samples: \(samples.count)\n\n"
+        
+        let featureOrder = ["lenIndex", "lenMiddle", "lenRing", "lenLittle",
+                           "gapThumbIndex", "gapIndexMiddle",
+                           "indexToMiddleRatio", "ringToMiddleRatio", "littleToMiddleRatio"]
+        
+        for name in featureOrder {
+            if let stat = stats[name] {
+                summary += String(format: "%20s: min=%.3f, max=%.3f, mean=%.3f\n",
+                                name, stat.min, stat.max, stat.mean)
+            }
+        }
+        
+        // 分数统计
+        let scoreV = samples.map { $0.scoreV }
+        let scoreOK = samples.map { $0.scoreOK }
+        let scorePalm = samples.map { $0.scorePalm }
+        let scoreFist = samples.map { $0.scoreFist }
+        let scoreIdx = samples.map { $0.scoreIndexFinger }
+        
+        summary += "\nScore Statistics:\n"
+        summary += String(format: "  V:     min=%d, max=%d, mean=%.1f\n",
+                         scoreV.min() ?? 0, scoreV.max() ?? 0,
+                         Double(scoreV.reduce(0, +)) / Double(scoreV.count))
+        summary += String(format: "  OK:    min=%d, max=%d, mean=%.1f\n",
+                         scoreOK.min() ?? 0, scoreOK.max() ?? 0,
+                         Double(scoreOK.reduce(0, +)) / Double(scoreOK.count))
+        summary += String(format: "  Palm:  min=%d, max=%d, mean=%.1f\n",
+                         scorePalm.min() ?? 0, scorePalm.max() ?? 0,
+                         Double(scorePalm.reduce(0, +)) / Double(scorePalm.count))
+        summary += String(format: "  Fist:  min=%d, max=%d, mean=%.1f\n",
+                         scoreFist.min() ?? 0, scoreFist.max() ?? 0,
+                         Double(scoreFist.reduce(0, +)) / Double(scoreFist.count))
+        summary += String(format: "  Index: min=%d, max=%d, mean=%.1f\n",
+                         scoreIdx.min() ?? 0, scoreIdx.max() ?? 0,
+                         Double(scoreIdx.reduce(0, +)) / Double(scoreIdx.count))
+        
+        summary += "==================================================\n"
+        return summary
     }
 }

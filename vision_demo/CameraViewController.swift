@@ -33,7 +33,7 @@ final class CameraViewController: UIViewController {
     
     /// 模式切换控件
     private let modeSegmentedControl: UISegmentedControl = {
-        let control = UISegmentedControl(items: ["手势识别", "人脸跟随", "目标跟踪"])
+        let control = UISegmentedControl(items: ["手势识别", "人脸跟随", "目标跟踪", "统计标定"])
         control.selectedSegmentIndex = 0
         control.backgroundColor = UIColor.white.withAlphaComponent(0.3)
         control.selectedSegmentTintColor = .systemYellow
@@ -60,6 +60,7 @@ final class CameraViewController: UIViewController {
         case handGesture = 0
         case faceTracking = 1
         case objectTracking = 2
+        case calibration = 3
     }
 
     private var currentMode: DetectionMode = .handGesture {
@@ -97,6 +98,49 @@ final class CameraViewController: UIViewController {
 
     /// 统计更新计数器（用于控制UI更新频率）
     private var statsUpdateCounter = 0
+    
+    // MARK: - 标定模式UI
+    
+    /// 标定会话
+    private var calibrationSession: CalibrationSession?
+    
+    /// 手势选择控件（标定模式）
+    private let calibrationGestureControl: UISegmentedControl = {
+        let items = ["V", "OK", "Palm", "Fist", "Index"]
+        let control = UISegmentedControl(items: items)
+        control.selectedSegmentIndex = 0
+        control.backgroundColor = UIColor.white.withAlphaComponent(0.5)
+        control.selectedSegmentTintColor = .systemBlue
+        control.isHidden = true
+        return control
+    }()
+    
+    /// 采样按钮
+    private let samplingButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.setTitle("开始采样", for: .normal)
+        button.titleLabel?.font = .systemFont(ofSize: 16, weight: .bold)
+        button.backgroundColor = .systemGreen
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 8
+        button.isHidden = true
+        return button
+    }()
+    
+    /// 统计结果显示视图
+    private let statsDisplayLabel: UILabel = {
+        let label = UILabel()
+        label.numberOfLines = 0
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        label.layer.cornerRadius = 8
+        label.layer.masksToBounds = true
+        label.textAlignment = .left
+        label.text = "选择手势并开始采样..."
+        label.isHidden = true
+        return label
+    }()
 
     // MARK: - 调参UI组件
 
@@ -196,6 +240,7 @@ final class CameraViewController: UIViewController {
         setupDebugUI()
         setupDebugLogging()
         setupDetectors()
+        setupCalibrationUI()
         
         if isTuningModeEnabled {
             setupTuningPanel()
@@ -232,6 +277,37 @@ final class CameraViewController: UIViewController {
                 y: gestureLabel.frame.maxY + 8,
                 width: view.bounds.width - 32,
                 height: min(120, view.bounds.height - gestureLabel.frame.maxY - 200)
+            )
+        }
+        
+        // 布局标定模式UI
+        if currentMode == .calibration {
+            let bottomSafe = view.safeAreaInsets.bottom
+            
+            // 手势选择控件
+            calibrationGestureControl.frame = CGRect(
+                x: 16,
+                y: gestureLabel.frame.maxY + 16,
+                width: view.bounds.width - 32,
+                height: 32
+            )
+            
+            // 采样按钮
+            samplingButton.frame = CGRect(
+                x: 16,
+                y: calibrationGestureControl.frame.maxY + 12,
+                width: view.bounds.width - 32,
+                height: 44
+            )
+            
+            // 统计显示区域
+            let statsY = samplingButton.frame.maxY + 12
+            let statsHeight = view.bounds.height - statsY - bottomSafe - 20
+            statsDisplayLabel.frame = CGRect(
+                x: 16,
+                y: statsY,
+                width: view.bounds.width - 32,
+                height: max(100, statsHeight)
             )
         }
         
@@ -308,6 +384,13 @@ final class CameraViewController: UIViewController {
         print("Updating UI for mode: \(currentMode)")
         trackingView.clear()
         
+        // 隐藏所有模式特定的UI
+        debugLabel.isHidden = true
+        calibrationGestureControl.isHidden = true
+        samplingButton.isHidden = true
+        statsDisplayLabel.isHidden = true
+        if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
+        
         switch currentMode {
         case .handGesture:
             gestureLabel.text = "请把手伸到镜头前"
@@ -318,16 +401,22 @@ final class CameraViewController: UIViewController {
         case .faceTracking:
             gestureLabel.text = "正在初始化人脸检测..."
             gestureLabel.isHidden = false
-            debugLabel.isHidden = true
-            if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
             print("Starting face detector...")
             faceDetector.start()
             
         case .objectTracking:
             gestureLabel.text = "请点击屏幕选择跟踪目标"
             gestureLabel.isHidden = false
-            debugLabel.isHidden = true
-            if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
+            
+        case .calibration:
+            gestureLabel.text = "统计标定模式"
+            gestureLabel.isHidden = false
+            calibrationGestureControl.isHidden = false
+            samplingButton.isHidden = false
+            statsDisplayLabel.isHidden = false
+            // 初始化标定会话
+            let targetGesture = gestureFromCalibrationIndex(calibrationGestureControl.selectedSegmentIndex)
+            calibrationSession = CalibrationSession(targetGesture: targetGesture)
         }
     }
     
@@ -390,6 +479,16 @@ final class CameraViewController: UIViewController {
             target: self,
             action: #selector(toggleDebug)
         )
+    }
+    
+    /// 设置标定模式UI
+    private func setupCalibrationUI() {
+        view.addSubview(calibrationGestureControl)
+        view.addSubview(samplingButton)
+        view.addSubview(statsDisplayLabel)
+        
+        calibrationGestureControl.addTarget(self, action: #selector(calibrationGestureChanged(_:)), for: .valueChanged)
+        samplingButton.addTarget(self, action: #selector(samplingButtonTapped), for: .touchUpInside)
     }
 
     /// 设置调参面板UI
@@ -479,6 +578,51 @@ final class CameraViewController: UIViewController {
         lines.append("straightCount = \(info.straightCount)")
 
         debugLabel.text = lines.joined(separator: "\n")
+    }
+    
+    // MARK: - 标定模式Actions
+    
+    @objc private func calibrationGestureChanged(_ sender: UISegmentedControl) {
+        let targetGesture = gestureFromCalibrationIndex(sender.selectedSegmentIndex)
+        calibrationSession = CalibrationSession(targetGesture: targetGesture)
+        statsDisplayLabel.text = "已选择手势: \(targetGesture.rawValue)\n\n请点击\"开始采样\""
+    }
+    
+    @objc private func samplingButtonTapped() {
+        guard let session = calibrationSession else { return }
+        
+        if session.isRecording {
+            // 停止采样
+            session.stopRecording()
+            samplingButton.setTitle("开始采样", for: .normal)
+            samplingButton.backgroundColor = .systemGreen
+            
+            // 计算并显示统计结果
+            let summary = session.generateSummary()
+            statsDisplayLabel.text = summary
+            
+            // 打印到控制台
+            print(summary)
+            
+        } else {
+            // 开始采样
+            session.startRecording()
+            samplingButton.setTitle("停止采样", for: .normal)
+            samplingButton.backgroundColor = .systemRed
+            statsDisplayLabel.text = "正在采样中...\n样本数: 0"
+        }
+    }
+    
+    /// 从UI索引转换为手势类型
+    private func gestureFromCalibrationIndex(_ index: Int) -> HandGestureType {
+        switch index {
+        case 0: return .vSign
+        case 1: return .okSign
+        case 2: return .palm
+        case 3: return .fist
+        case 4: return .indexFinger
+        default: return .unknown
+        }
     }
 
     // MARK: - Camera
@@ -597,6 +741,37 @@ final class CameraViewController: UIViewController {
             return
         }
 
+        // 标定模式：采集样本
+        if currentMode == .calibration, let session = calibrationSession, session.isRecording {
+            // 获取调试信息用于采样
+            if let debugInfo = getLastDebugInfo(from: observation) {
+                let sample = GestureSample(
+                    lenIndex: debugInfo.lenIndex,
+                    lenMiddle: debugInfo.lenMiddle,
+                    lenRing: debugInfo.lenRing,
+                    lenLittle: debugInfo.lenLittle,
+                    gapThumbIndex: debugInfo.gapThumbIndex,
+                    gapIndexMiddle: debugInfo.gapIndexMiddle,
+                    indexToMiddleRatio: debugInfo.indexToMiddleRatio,
+                    ringToMiddleRatio: debugInfo.ringToMiddleRatio,
+                    littleToMiddleRatio: debugInfo.littleToMiddleRatio,
+                    straightCount: debugInfo.straightCount,
+                    scoreV: debugInfo.scoreV,
+                    scoreOK: debugInfo.scoreOK,
+                    scorePalm: debugInfo.scorePalm,
+                    scoreFist: debugInfo.scoreFist,
+                    scoreIndexFinger: debugInfo.scoreIndexFinger
+                )
+                session.addSample(sample)
+                
+                // 更新UI显示采样数
+                DispatchQueue.main.async { [weak self] in
+                    self?.statsDisplayLabel.text = "正在采样中...\n样本数: \(session.samples.count)"
+                }
+            }
+            return  // 标定模式不更新手势识别UI
+        }
+
         // 原有UI显示逻辑使用预测结果
         updateStableGesture(with: result.predicted)
 
@@ -617,6 +792,25 @@ final class CameraViewController: UIViewController {
                 }
             }
         }
+    }
+    
+    /// 获取最后一次的调试信息（用于标定模式采样）
+    private func getLastDebugInfo(from observation: VNHumanHandPoseObservation) -> HandGestureClassifier.HandGestureDebugInfo? {
+        var capturedInfo: HandGestureClassifier.HandGestureDebugInfo?
+        
+        // 临时设置调试回调来捕获信息
+        let originalHandler = classifier.debugInfoHandler
+        classifier.debugInfoHandler = { info in
+            capturedInfo = info
+        }
+        
+        // 重新分类以触发调试回调
+        _ = classifier.classify(from: observation)
+        
+        // 恢复原始回调
+        classifier.debugInfoHandler = originalHandler
+        
+        return capturedInfo
     }
 
     // MARK: - 手势平滑 & UI
