@@ -365,12 +365,20 @@ struct HandGestureClassifier {
         if features.indexToMiddleRatio >= Constants.VThreshold.indexToMiddleRatioMin {
             scoreV += 1  // 食指略长于中指（基于V mean≈1.14）
         }
+        
+        // 关键区分点：V手势要求无名指和小指必须弯曲（短）
         if features.ringToMiddleRatio <= Constants.VThreshold.ringToMiddleRatioMax {
-            scoreV += 1  // 无名指明显短于中指（基于V mean≈0.40）
+            scoreV += 2  // 无名指明显短于中指（加强权重）
+        } else {
+            scoreV -= 2  // 如果无名指太长，说明可能不是V手势（可能是手掌）
         }
+        
         if features.littleToMiddleRatio <= Constants.VThreshold.littleToMiddleRatioMax {
-            scoreV += 1  // 小指明显短于中指（基于V mean≈0.39）
+            scoreV += 2  // 小指明显短于中指（加强权重）
+        } else {
+            scoreV -= 2  // 如果小指太长，说明可能不是V手势
         }
+        
         if straightCount <= Constants.VThreshold.maxStraightCount {
             scoreV += 1  // 通常2根手指伸直
         }
@@ -408,12 +416,20 @@ struct HandGestureClassifier {
            features.indexToMiddleRatio <= Constants.PalmThreshold.indexToMiddleRatioMax {
             scorePalm += 1  // 食指和中指差不多长（基于Palm mean≈1.02）
         }
+        
+        // 关键区分点：手掌要求无名指和小指必须伸直（长）
         if features.ringToMiddleRatio >= Constants.PalmThreshold.ringToMiddleRatioMin {
-            scorePalm += 1  // 无名指比较长（基于Palm mean≈0.91）
+            scorePalm += 2  // 无名指比较长（加强权重）
+        } else {
+            scorePalm -= 2  // 如果无名指太短，扣分（可能是V手势）
         }
+        
         if features.littleToMiddleRatio >= Constants.PalmThreshold.littleToMiddleRatioMin {
-            scorePalm += 1  // 小指比较长（基于Palm mean≈0.77）
+            scorePalm += 2  // 小指比较长（加强权重）
+        } else {
+            scorePalm -= 2  // 如果小指太短，扣分
         }
+        
         if straightCount >= Constants.PalmThreshold.minStraightCount {
             scorePalm += 1  // 四指都直
         }
