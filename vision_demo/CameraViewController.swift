@@ -30,6 +30,15 @@ final class CameraViewController: UIViewController {
         label.text = "等待识别..."
         return label
     }()
+    
+    /// 模式切换控件
+    private let modeSegmentedControl: UISegmentedControl = {
+        let control = UISegmentedControl(items: ["手势识别", "人脸跟随", "目标跟踪"])
+        control.selectedSegmentIndex = 0
+        control.backgroundColor = UIColor.white.withAlphaComponent(0.3)
+        control.selectedSegmentTintColor = .systemYellow
+        return control
+    }()
 
     /// Debug开关状态
     private var isDebugEnabled = true
@@ -46,12 +55,34 @@ final class CameraViewController: UIViewController {
         return request
     }()
 
+    /// 检测模式枚举
+    enum DetectionMode: Int {
+        case handGesture = 0
+        case faceTracking = 1
+        case objectTracking = 2
+    }
+
+    private var currentMode: DetectionMode = .handGesture {
+        didSet {
+            updateUIForMode()
+            resetTrackers()
+        }
+    }
+
+    // MARK: - Detectors
+    
     private var classifier = HandGestureClassifier()
-
+    private let faceDetector = FaceDetector()
+    private let objectTracker = ObjectTracker()
+    
+    // MARK: - Tracking UI
+    
+    private let trackingView = TrackingView(frame: .zero)
+    
     // MARK: - 调参模式
-
+    
     /// 调参模式开关
-    private let isTuningModeEnabled = true
+    private let isTuningModeEnabled = false // 默认关闭，让出空间给模式切换
 
     /// 统计管理器
     private let statsManager = HandGestureStatsManager()
@@ -158,26 +189,40 @@ final class CameraViewController: UIViewController {
         view.backgroundColor = .black
         setupPreviewLayer()
         setupGestureLabel()
+        setupModeControl()
+        setupTrackingView()
         setupDebugUI()
         setupDebugLogging()
+        setupDetectors()
+        
         if isTuningModeEnabled {
             setupTuningPanel()
         }
         checkCameraAuthorizationAndStart()
     }
-
+    
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         previewLayer?.frame = view.bounds
-
+        trackingView.frame = view.bounds
+        
         let topSafe = view.safeAreaInsets.top
+        
+        // 模式切换控件
+        modeSegmentedControl.frame = CGRect(
+            x: 16,
+            y: topSafe + 10,
+            width: view.bounds.width - 32,
+            height: 32
+        )
+        
         gestureLabel.frame = CGRect(
             x: 16,
-            y: topSafe + 16,
+            y: modeSegmentedControl.frame.maxY + 16,
             width: view.bounds.width - 32,
             height: 44
         )
-
+        
         // 布局debugLabel（在gestureLabel下方）
         if isDebugEnabled {
             debugLabel.frame = CGRect(
@@ -187,10 +232,113 @@ final class CameraViewController: UIViewController {
                 height: min(120, view.bounds.height - gestureLabel.frame.maxY - 200)
             )
         }
-
+        
         if isTuningModeEnabled {
             layoutTuningPanel()
         }
+    }
+    
+    private func setupModeControl() {
+        view.addSubview(modeSegmentedControl)
+        modeSegmentedControl.addTarget(self, action: #selector(modeChanged(_:)), for: .valueChanged)
+    }
+    
+    private func setupTrackingView() {
+        view.addSubview(trackingView)
+    }
+    
+    private func setupDetectors() {
+        // 配置人脸检测回调
+        faceDetector.onFaceDetected = { [weak self] rect in
+            DispatchQueue.main.async {
+                self?.trackingView.updateTrackingRect(rect, color: .yellow)
+                self?.gestureLabel.text = "检测到人脸"
+            }
+        }
+        
+        faceDetector.onNoFaceDetected = { [weak self] in
+            DispatchQueue.main.async {
+                self?.trackingView.clear()
+                self?.gestureLabel.text = "未检测到人脸"
+            }
+        }
+        
+        // 配置目标跟踪回调
+        objectTracker.onTrackingUpdate = { [weak self] rect in
+            DispatchQueue.main.async {
+                self?.trackingView.updateTrackingRect(rect, color: .green)
+                self?.gestureLabel.text = "正在跟踪目标"
+            }
+        }
+        
+        objectTracker.onTrackingLost = { [weak self] in
+            DispatchQueue.main.async {
+                self?.trackingView.clear()
+                self?.gestureLabel.text = "目标丢失或未选择 (点击屏幕选择)"
+            }
+        }
+    }
+    
+    @objc private func modeChanged(_ sender: UISegmentedControl) {
+        guard let mode = DetectionMode(rawValue: sender.selectedSegmentIndex) else { return }
+        currentMode = mode
+    }
+    
+    private func updateUIForMode() {
+        trackingView.clear()
+        
+        switch currentMode {
+        case .handGesture:
+            gestureLabel.text = "请把手伸到镜头前"
+            gestureLabel.isHidden = false
+            debugLabel.isHidden = !isDebugEnabled
+            if isTuningModeEnabled { tuningPanelStackView.isHidden = false }
+            
+        case .faceTracking:
+            gestureLabel.text = "正在初始化人脸检测..."
+            gestureLabel.isHidden = false
+            debugLabel.isHidden = true
+            if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
+            faceDetector.start()
+            
+        case .objectTracking:
+            gestureLabel.text = "请点击屏幕选择跟踪目标"
+            gestureLabel.isHidden = false
+            debugLabel.isHidden = true
+            if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
+        }
+    }
+    
+    private func resetTrackers() {
+        faceDetector.stop()
+        objectTracker.stop()
+    }
+    
+    // MARK: - Touch Handling
+    
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard currentMode == .objectTracking, let touch = touches.first else { return }
+        
+        let location = touch.location(in: view)
+        let normalizedPoint = CGPoint(x: location.x / view.bounds.width, y: location.y / view.bounds.height)
+        
+        // 创建一个以点击点为中心的初始框 (100x100)
+        let boxSize: CGFloat = 100
+        let normalizedWidth = boxSize / view.bounds.width
+        let normalizedHeight = boxSize / view.bounds.height
+        
+        let rect = CGRect(
+            x: normalizedPoint.x - normalizedWidth / 2,
+            y: normalizedPoint.y - normalizedHeight / 2,
+            width: normalizedWidth,
+            height: normalizedHeight
+        )
+        
+        objectTracker.initializeTracking(with: rect)
+        
+        // 立即显示框
+        trackingView.updateTrackingRect(rect, color: .green)
+        gestureLabel.text = "目标已选择，开始跟踪"
     }
 
     // MARK: - Setup UI
@@ -377,19 +525,28 @@ final class CameraViewController: UIViewController {
     }
 
     // MARK: - Vision 处理
-
+    
     private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-
-        let handler = VNImageRequestHandler(
-            cvPixelBuffer: pixelBuffer,
-            orientation: .upMirrored,    // 前置 + 镜像
-            options: [:]
-        )
-        do {
-            try handler.perform([handPoseRequest])
-        } catch {
-            print("Vision perform error: \(error)")
+        
+        switch currentMode {
+        case .handGesture:
+            let handler = VNImageRequestHandler(
+                cvPixelBuffer: pixelBuffer,
+                orientation: .upMirrored,    // 前置 + 镜像
+                options: [:]
+            )
+            do {
+                try handler.perform([handPoseRequest])
+            } catch {
+                print("Vision perform error: \(error)")
+            }
+            
+        case .faceTracking:
+            faceDetector.detectFaces(in: pixelBuffer)
+            
+        case .objectTracking:
+            objectTracker.trackObject(in: pixelBuffer)
         }
     }
 
