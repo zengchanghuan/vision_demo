@@ -69,7 +69,7 @@ final class CameraViewController: UIViewController {
 
     /// 真实手势选择控件
     private let groundTruthSegmentedControl: UISegmentedControl = {
-        let control = UISegmentedControl(items: ["未知", "V", "OK", "手掌"])
+        let control = UISegmentedControl(items: ["未知", "V", "OK", "手掌", "拳头", "食指"])
         control.selectedSegmentIndex = 0
         control.backgroundColor = UIColor.white.withAlphaComponent(0.3)
         control.selectedSegmentTintColor = .systemBlue
@@ -299,9 +299,10 @@ final class CameraViewController: UIViewController {
         guard isDebugEnabled else { return }
 
         var lines: [String] = []
-        lines.append("Gesture: \(info.gesture.rawValue) (V/OK/Palm = \(info.scoreV) / \(info.scoreOK) / \(info.scorePalm))")
-        lines.append("gaps:  thumb-index = \(String(format: "%.3f", info.gapThumbIndex)), index-middle = \(String(format: "%.3f", info.gapIndexMiddle))")
-        lines.append("ratios: idx/mid = \(String(format: "%.2f", info.indexToMiddleRatio)), ring/mid = \(String(format: "%.2f", info.ringToMiddleRatio)), lit/mid = \(String(format: "%.2f", info.littleToMiddleRatio))")
+        lines.append("Gesture: \(info.gesture.rawValue)")
+        lines.append("Scores: V/OK/Palm/Fist/Idx = \(info.scoreV)/\(info.scoreOK)/\(info.scorePalm)/\(info.scoreFist)/\(info.scoreIndexFinger)")
+        lines.append("gaps: thumb-idx=\(String(format: "%.3f", info.gapThumbIndex)), idx-mid=\(String(format: "%.3f", info.gapIndexMiddle))")
+        lines.append("ratios: idx/mid=\(String(format: "%.2f", info.indexToMiddleRatio)), ring/mid=\(String(format: "%.2f", info.ringToMiddleRatio))")
         lines.append("straightCount = \(info.straightCount)")
 
         debugLabel.text = lines.joined(separator: "\n")
@@ -467,6 +468,8 @@ final class CameraViewController: UIViewController {
             threshold = 0.9  // OK 手势需要 90% 的帧一致才算稳定
         case .vSign, .palm:
             threshold = 0.75  // V 手势和张开手掌需要 75% 的帧一致
+        case .fist, .indexFinger:
+            threshold = 0.75  // 拳头和食指需要 75% 的帧一致
         default:
             threshold = 0.0  // unknown 或其他未处理手势
         }
@@ -497,8 +500,12 @@ final class CameraViewController: UIViewController {
                 self.gestureLabel.text = "识别到：👌 OK 手势"
             case .palm:
                 self.gestureLabel.text = "识别到：🖐 手掌张开"
+            case .fist:
+                self.gestureLabel.text = "识别到：✊ 拳头"
+            case .indexFinger:
+                self.gestureLabel.text = "识别到：☝️ 食指"
             default:
-                self.gestureLabel.text = "请把手伸到镜头前（V / OK / 张开）"
+                self.gestureLabel.text = "请把手伸到镜头前"
             }
         }
     }
@@ -516,6 +523,10 @@ final class CameraViewController: UIViewController {
             currentGroundTruthGesture = .okSign
         case 3:
             currentGroundTruthGesture = .palm
+        case 4:
+            currentGroundTruthGesture = .fist
+        case 5:
+            currentGroundTruthGesture = .indexFinger
         default:
             currentGroundTruthGesture = .unknown
         }

@@ -125,6 +125,36 @@ struct HandGestureClassifier {
             static let minScore: Int = 4
         }
 
+        /// 拳头手势阈值（所有手指弯曲，手指长度都很短）
+        struct FistThreshold {
+            // 拳头时所有手指都弯曲，没有手指伸直
+            static let maxStraightCount: Int = 0
+            // 拳头时食指相对于中指会变短（都弯曲）
+            static let indexToMiddleRatioMax: CGFloat = 0.85
+            // 拳头时无名指相对中指较短
+            static let ringToMiddleRatioMax: CGFloat = 0.85
+            // 拳头时小指相对中指较短
+            static let littleToMiddleRatioMax: CGFloat = 0.85
+            // 拳头时指尖间距都很小
+            static let thumbIndexGapMax: CGFloat = 0.15
+            static let indexMiddleGapMax: CGFloat = 0.08
+            static let minScore: Int = 4
+        }
+
+        /// 食指手势阈值（只有食指伸直）
+        struct IndexFingerThreshold {
+            // 食指手势只有食指伸直（straightCount = 1）
+            static let exactStraightCount: Int = 1
+            // 食指应该比中指长
+            static let indexToMiddleRatioMin: CGFloat = 1.05
+            // 无名指和小指应该明显短于中指（弯曲）
+            static let ringToMiddleRatioMax: CGFloat = 0.70
+            static let littleToMiddleRatioMax: CGFloat = 0.70
+            // 拇指和食指间距较小（食指指向时）
+            static let thumbIndexGapMax: CGFloat = 0.20
+            static let minScore: Int = 4
+        }
+
         // 全局阈值
         static let minAcceptScore: Int = 4  // 最低通过分数
 
@@ -151,6 +181,8 @@ struct HandGestureClassifier {
         let scoreV: Int
         let scoreOK: Int
         let scorePalm: Int
+        let scoreFist: Int
+        let scoreIndexFinger: Int
     }
 
     /// 可选的调试日志回调，用于输出关键特征值
@@ -310,15 +342,17 @@ struct HandGestureClassifier {
 
     // MARK: - 手势打分
 
-    /// 为三个手势分别打分
+    /// 为五个手势分别打分
     /// - Parameters:
     ///   - features: 特征向量
     ///   - straightCount: 伸直手指数量
-    /// - Returns: (v分数, ok分数, palm分数)
-    private func scoreGestures(features: GestureFeatures, straightCount: Int) -> (v: Int, ok: Int, palm: Int) {
+    /// - Returns: (v分数, ok分数, palm分数, fist分数, indexFinger分数)
+    private func scoreGestures(features: GestureFeatures, straightCount: Int) -> (v: Int, ok: Int, palm: Int, fist: Int, indexFinger: Int) {
         var scoreV = 0
         var scoreOK = 0
         var scorePalm = 0
+        var scoreFist = 0
+        var scoreIndexFinger = 0
 
         // V手势打分
         if features.gapThumbIndex >= Constants.VThreshold.thumbIndexGapMin {
@@ -384,7 +418,44 @@ struct HandGestureClassifier {
             scorePalm += 1  // 四指都直
         }
 
-        return (scoreV, scoreOK, scorePalm)
+        // 拳头打分
+        if straightCount <= Constants.FistThreshold.maxStraightCount {
+            scoreFist += 2  // 没有手指伸直
+        }
+        if features.gapThumbIndex <= Constants.FistThreshold.thumbIndexGapMax {
+            scoreFist += 2  // 拇指食指间距很小
+        }
+        if features.gapIndexMiddle <= Constants.FistThreshold.indexMiddleGapMax {
+            scoreFist += 1  // 食指中指间距很小
+        }
+        if features.indexToMiddleRatio <= Constants.FistThreshold.indexToMiddleRatioMax {
+            scoreFist += 1  // 食指相对中指变短（都弯曲）
+        }
+        if features.ringToMiddleRatio <= Constants.FistThreshold.ringToMiddleRatioMax {
+            scoreFist += 1  // 无名指相对中指变短
+        }
+        if features.littleToMiddleRatio <= Constants.FistThreshold.littleToMiddleRatioMax {
+            scoreFist += 1  // 小指相对中指变短
+        }
+
+        // 食指手势打分
+        if straightCount == Constants.IndexFingerThreshold.exactStraightCount {
+            scoreIndexFinger += 3  // 只有一根手指伸直（关键特征）
+        }
+        if features.indexToMiddleRatio >= Constants.IndexFingerThreshold.indexToMiddleRatioMin {
+            scoreIndexFinger += 2  // 食指比中指长
+        }
+        if features.ringToMiddleRatio <= Constants.IndexFingerThreshold.ringToMiddleRatioMax {
+            scoreIndexFinger += 1  // 无名指明显短于中指（弯曲）
+        }
+        if features.littleToMiddleRatio <= Constants.IndexFingerThreshold.littleToMiddleRatioMax {
+            scoreIndexFinger += 1  // 小指明显短于中指（弯曲）
+        }
+        if features.gapThumbIndex <= Constants.IndexFingerThreshold.thumbIndexGapMax {
+            scoreIndexFinger += 1  // 拇指食指间距较小
+        }
+
+        return (scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger)
     }
 
     // MARK: - 手势分类入口
@@ -399,12 +470,12 @@ struct HandGestureClassifier {
             return .unknown
         }
 
-        // 为三个手势打分
+        // 为五个手势打分
         let scores = scoreGestures(features: gestureFeatures, straightCount: features.straightCount)
-        let (scoreV, scoreOK, scorePalm) = scores
+        let (scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger) = scores
 
         // 找出最高分
-        let maxScore = max(scoreV, scoreOK, scorePalm)
+        let maxScore = max(scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger)
 
         // 如果最高分低于阈值，返回unknown
         guard maxScore >= Constants.minAcceptScore else {
@@ -413,7 +484,7 @@ struct HandGestureClassifier {
             debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
             debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
             debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
-            debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
+            debugInfo.append(String(format: "score V/OK/Palm/Fist/Idx = %d/%d/%d/%d/%d", scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger))
             debugLogHandler?("未识别 ✗ | \(debugInfo.joined(separator: " | "))")
 
             // 构造调试信息
@@ -431,16 +502,22 @@ struct HandGestureClassifier {
                 straightCount: features.straightCount,
                 scoreV: scoreV,
                 scoreOK: scoreOK,
-                scorePalm: scorePalm
+                scorePalm: scorePalm,
+                scoreFist: scoreFist,
+                scoreIndexFinger: scoreIndexFinger
             )
             debugInfoHandler?(debugInfo_obj)
 
             return .unknown
         }
 
-        // 按优先级选择：Palm > V > OK（保证手掌张开高精度）
+        // 按优先级选择最高分的手势
         let predicted: HandGestureType
-        if scorePalm == maxScore {
+        if scoreIndexFinger == maxScore {
+            predicted = .indexFinger
+        } else if scoreFist == maxScore {
+            predicted = .fist
+        } else if scorePalm == maxScore {
             predicted = .palm
         } else if scoreV == maxScore {
             predicted = .vSign
@@ -453,7 +530,7 @@ struct HandGestureClassifier {
         debugInfo.append(String(format: "lenIdx:%.3f lenMid:%.3f lenRing:%.3f lenLit:%.3f", features.lenIndex, features.lenMiddle, features.lenRing, features.lenLittle))
         debugInfo.append(String(format: "gapIdxMid:%.3f gapThumbIdx:%.3f", features.indexMiddleGap, features.thumbIndexGap))
         debugInfo.append(String(format: "ratio idx/mid:%.2f ring/mid:%.2f lit/mid:%.2f", gestureFeatures.indexToMiddleRatio, gestureFeatures.ringToMiddleRatio, gestureFeatures.littleToMiddleRatio))
-        debugInfo.append(String(format: "score V/OK/Palm = %d/%d/%d", scoreV, scoreOK, scorePalm))
+        debugInfo.append(String(format: "score V/OK/Palm/Fist/Idx = %d/%d/%d/%d/%d", scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger))
 
         let gestureName: String
         switch predicted {
@@ -463,6 +540,10 @@ struct HandGestureClassifier {
             gestureName = "OK手势"
         case .palm:
             gestureName = "手掌张开"
+        case .fist:
+            gestureName = "拳头"
+        case .indexFinger:
+            gestureName = "食指"
         default:
             gestureName = "未知"
         }
@@ -483,7 +564,9 @@ struct HandGestureClassifier {
             straightCount: features.straightCount,
             scoreV: scoreV,
             scoreOK: scoreOK,
-            scorePalm: scorePalm
+            scorePalm: scorePalm,
+            scoreFist: scoreFist,
+            scoreIndexFinger: scoreIndexFinger
         )
         debugInfoHandler?(debugInfo_obj)
 
