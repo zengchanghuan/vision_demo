@@ -1,0 +1,10 @@
+[HandGestureDebug] 拳头 ✓ | lenIdx:0.061 lenMid:0.073 lenRing:0.085 lenLit:0.098 | gapIdxMid:0.023 gapThumbIdx:0.067 | ratio idx/mid:0.82 ring/mid:1.15 lit/mid:1.33 | score V/OK/Palm/Fist/Idx = -3/3/1/7/1
+[HandGestureDebug] 手掌张开 ✓ | lenIdx:0.111 lenMid:0.156 lenRing:0.151 lenLit:0.145 | gapIdxMid:0.059 gapThumbIdx:0.136 | ratio idx/mid:0.71 ring/mid:0.96 lit/mid:0.92 | score V/OK/Palm/Fist/Idx = -3/1/8/4/-1
+[HandGestureDebug] OK手势 ✓ | lenIdx:0.069 lenMid:0.091 lenRing:0.119 lenLit:0.120 | gapIdxMid:0.029 gapThumbIdx:0.019 | ratio idx/mid:0.75 ring/mid:1.30 lit/mid:1.31 | score V/OK/Palm/Fist/Idx = -3/6/1/3/0
+[HandGestureDebug] 未知 ✓ | lenIdx:0.053 lenMid:0.081 lenRing:0.108 lenLit:0.101 | gapIdxMid:0.038 gapThumbIdx:0.112 | ratio idx/mid:0.66 ring/mid:1.33 lit/mid:1.25 | score V/OK/Palm/Fist/Idx = -3/3/4/4/-1
+[HandGestureDebug] 食指 ✓ | lenIdx:0.027 lenMid:0.024 lenRing:0.037 lenLit:0.051 | gapIdxMid:0.011 gapThumbIdx:0.058 | ratio idx/mid:1.10 ring/mid:1.50 lit/mid:2.11 | score V/OK/Palm/Fist/Idx = -2/2/1/4/6
+[HandGestureDebug] V手势 ✓ | lenIdx:0.145 lenMid:0.152 lenRing:0.089 lenLit:0.078 | gapIdxMid:0.089 gapThumbIdx:0.234 | ratio idx/mid:0.95 ring/mid:0.58 lit/mid:0.51 | score V/OK/Palm/Fist/Idx = 8/1/2/-2/0
+[HandGestureDebug] V手势 ✓ | lenIdx:0.135 lenMid:0.142 lenRing:0.082 lenLit:0.071 | gapIdxMid:0.082 gapThumbIdx:0.225 | ratio idx/mid:0.95 ring/mid:0.57 lit/mid:0.50 | score V/OK/Palm/Fist/Idx = 8/1/2/-2/0
+[HandGestureDebug] 拳头 ✓ | lenIdx:0.042 lenMid:0.048 lenRing:0.051 lenLit:0.062 | gapIdxMid:0.015 gapThumbIdx:0.045 | ratio idx/mid:0.87 ring/mid:1.06 lit/mid:1.29 | score V/OK/Palm/Fist/Idx = -3/2/1/6/1
+[HandGestureDebug] 拳头 ✓ | lenIdx:0.038 lenMid:0.045 lenRing:0.048 lenLit:0.058 | gapIdxMid:0.012 gapThumbIdx:0.041 | ratio idx/mid:0.84 ring/mid:1.06 lit/mid:1.28 | score V/OK/Palm/Fist/Idx = -4/2/1/6/0
+[HandGestureDebug] V手势 ✓ | lenIdx:0.125 lenMid:0.132 lenRing:0.075 lenLit:0.068 | gapIdxMid:0.075 gapThumbIdx:0.215 | ratio idx/mid:0.94 ring/mid:0.56 lit/mid:0.51 | score V/OK/Palm/Fist/Idx = 8/0/2/-2/0
