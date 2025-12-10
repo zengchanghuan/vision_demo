@@ -385,20 +385,33 @@ struct HandGestureClassifier {
 
         // OK手势打分
         if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax {
-            scoreOK += 2  // 拇指食指靠得很近（基于OK mean≈0.043）
+            // 拇指食指靠得很近，更像 OK
+            scoreOK += 2
+        } else if features.gapThumbIndex >= Constants.PalmThreshold.thumbIndexGapMin {
+            // 拇指食指间距已经接近/超过手掌区间，更像手掌
+            scoreOK -= 2
         }
+        
         if features.gapIndexMiddle >= Constants.OKThreshold.indexMiddleGapMin {
-            scoreOK += 2  // 食指弯成圈后和中指间距较大（基于OK mean≈0.18）
+            // 食指弯成圈后和中指间距较大
+            scoreOK += 2
+        } else if features.gapIndexMiddle <= Constants.PalmThreshold.indexMiddleGapMax {
+            // 食指中指间距非常小，更像手掌
+            scoreOK -= 1
         }
+        
         if features.indexToMiddleRatio <= Constants.OKThreshold.indexToMiddleRatioMax {
-            scoreOK += 1  // 食指明显变短（基于OK mean≈0.70）
+            scoreOK += 1  // 食指明显变短
         }
+        
         if features.ringToMiddleRatio >= Constants.OKThreshold.ringToMiddleRatioMin {
-            scoreOK += 1  // 无名指比较直（基于OK mean≈0.89）
+            scoreOK += 1  // 无名指比较直
         }
+        
         if features.littleToMiddleRatio >= Constants.OKThreshold.littleToMiddleRatioMin {
-            scoreOK += 1  // 小指比较直（基于OK mean≈0.77）
+            scoreOK += 1  // 小指比较直
         }
+        
         if straightCount >= Constants.OKThreshold.minStraightCount {
             scoreOK += 1  // 至少还有2根手指伸直
         }
@@ -406,28 +419,36 @@ struct HandGestureClassifier {
         // 手掌张开打分
         if features.gapThumbIndex >= Constants.PalmThreshold.thumbIndexGapMin &&
            features.gapThumbIndex <= Constants.PalmThreshold.thumbIndexGapMax {
-            scorePalm += 2  // 拇指食指间距在合理区间（基于Palm mean≈0.18）
+            scorePalm += 2  // 拇指食指间距在 Palm 合理区间
+        } else if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax {
+            // 拇指食指太近，更像 OK
+            scorePalm -= 2
         }
+        
         if features.gapIndexMiddle >= Constants.PalmThreshold.indexMiddleGapMin &&
            features.gapIndexMiddle <= Constants.PalmThreshold.indexMiddleGapMax {
-            scorePalm += 2  // 食指中指间距较小（基于Palm mean≈0.065）
+            scorePalm += 2  // 食指中指间距较小
+        } else if features.gapIndexMiddle >= Constants.OKThreshold.indexMiddleGapMin {
+            // 食指中指距离太大，更像 OK
+            scorePalm -= 2
         }
+        
         if features.indexToMiddleRatio >= Constants.PalmThreshold.indexToMiddleRatioMin &&
            features.indexToMiddleRatio <= Constants.PalmThreshold.indexToMiddleRatioMax {
-            scorePalm += 1  // 食指和中指差不多长（基于Palm mean≈1.02）
+            scorePalm += 1  // 食指和中指长度接近
         }
         
         // 关键区分点：手掌要求无名指和小指必须伸直（长）
         if features.ringToMiddleRatio >= Constants.PalmThreshold.ringToMiddleRatioMin {
-            scorePalm += 2  // 无名指比较长（加强权重）
+            scorePalm += 2  // 无名指比较长
         } else {
-            scorePalm -= 2  // 如果无名指太短，扣分（可能是V手势）
+            scorePalm -= 2  // 无名指太短，扣分
         }
         
         if features.littleToMiddleRatio >= Constants.PalmThreshold.littleToMiddleRatioMin {
-            scorePalm += 2  // 小指比较长（加强权重）
+            scorePalm += 2  // 小指比较长
         } else {
-            scorePalm -= 2  // 如果小指太短，扣分
+            scorePalm -= 2  // 小指太短，扣分
         }
         
         if straightCount >= Constants.PalmThreshold.minStraightCount {
