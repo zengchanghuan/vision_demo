@@ -492,6 +492,15 @@ struct HandGestureClassifier {
             scoreIndexFinger += 1  // 拇指食指间距较小
         }
 
+        // 额外区分逻辑：如果几何特征明显偏向 OK，就稍微提升 OK，压低 Palm
+        if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax &&
+           features.gapIndexMiddle >= Constants.OKThreshold.indexMiddleGapMin &&
+           features.indexToMiddleRatio <= Constants.OKThreshold.indexToMiddleRatioMax {
+            // 典型 OK 手势：拇指和食指非常接近，食指明显变短，并且和中指之间间距变大
+            scoreOK += 1
+            scorePalm -= 1
+        }
+
         return (scoreV, scoreOK, scorePalm, scoreFist, scoreIndexFinger)
     }
 
@@ -554,12 +563,13 @@ struct HandGestureClassifier {
             predicted = .indexFinger
         } else if scoreFist == maxScore {
             predicted = .fist
-        } else if scorePalm == maxScore {
-            predicted = .palm
         } else if scoreV == maxScore {
             predicted = .vSign
-        } else {
+        } else if scoreOK == maxScore {
+            // 当 OK 和 Palm 打平时，优先认为是 OK 手势
             predicted = .okSign
+        } else {
+            predicted = .palm
         }
 
         // 准备调试信息

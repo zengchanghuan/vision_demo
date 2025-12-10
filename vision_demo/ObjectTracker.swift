@@ -72,7 +72,7 @@ class ObjectTracker {
     func trackObject(in pixelBuffer: CVPixelBuffer) {
         guard isEnabled, let request = trackingRequest else { return }
 
-        // 设置跟踪结果回调
+        // 精度优先
         request.trackingLevel = .accurate
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
@@ -80,25 +80,45 @@ class ObjectTracker {
         do {
             try handler.perform([request])
 
-            // 处理跟踪结果
-            if let results = request.results as? [VNObservation], let observation = results.first as? VNDetectedObjectObservation {
-                // 检查置信度
-                if observation.confidence > 0.3 {
-                    // 转换为UIKit坐标系（原点在左上角）
-                    let boundingBox = observation.boundingBox
-                    let rect = CGRect(
-                        x: boundingBox.minX,
-                        y: 1 - boundingBox.minY - boundingBox.height,  // 翻转Y轴
-                        width: boundingBox.width,
-                        height: boundingBox.height
-                    )
-                    onTrackingUpdate?(rect)
-                } else {
-                    onTrackingLost?()
-                }
-            } else {
+            guard
+                let results = request.results as? [VNObservation],
+                let observation = results.first as? VNDetectedObjectObservation
+            else {
                 onTrackingLost?()
+                return
             }
+
+            // 置信度过低直接认为丢失
+            guard observation.confidence > 0.3 else {
+                onTrackingLost?()
+                return
+            }
+
+            let bbox = observation.boundingBox // Vision：归一化，原点在左下
+
+            // 先转换到"元数据坐标系"：归一化 + 原点左上，方便给 previewLayer 使用
+            var rect = CGRect(
+                x: bbox.minX,
+                y: 1 - bbox.minY - bbox.height,
+                width: bbox.width,
+                height: bbox.height
+            )
+
+            // 把矩形调整为"接近正方形"：以中心点为基准，取宽高中的较小值
+            let center = CGPoint(x: rect.midX, y: rect.midY)
+            let side = max(min(rect.width, rect.height), 0.001)
+            rect = CGRect(
+                x: center.x - side / 2,
+                y: center.y - side / 2,
+                width: side,
+                height: side
+            )
+
+            // 保证仍然在 0~1 范围，避免越界
+            rect.origin.x = max(0, min(rect.origin.x, 1 - rect.width))
+            rect.origin.y = max(0, min(rect.origin.y, 1 - rect.height))
+
+            onTrackingUpdate?(rect)
         } catch {
             print("目标跟踪执行失败: \(error.localizedDescription)")
             onTrackingLost?()

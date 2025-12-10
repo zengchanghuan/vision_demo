@@ -277,11 +277,15 @@ final class CameraViewController: UIViewController {
         
         // 配置目标跟踪回调
         objectTracker.onTrackingUpdate = { [weak self] rect in
+            guard let self = self else { return }
             DispatchQueue.main.async {
-                guard let self = self else { return }
-                // rect 是 metadata 归一化坐标，需要转换为屏幕坐标
-                let displayRect = self.previewLayer.layerRectConverted(fromMetadataOutputRect: rect)
-                self.trackingView.updateTrackingRect(displayRect, color: .green, isDashed: false, isNormalized: false)
+                // rect：0~1 的归一化元数据坐标（原点左上）
+                // 使用 previewLayer 转成视图坐标，自动处理裁剪/比例
+                let convertedRect = self.previewLayer.layerRectConverted(fromMetadataOutputRect: rect)
+                self.trackingView.updateTrackingRect(convertedRect,
+                                                     color: .green,
+                                                     isDashed: false,
+                                                     isNormalized: false)
                 self.gestureLabel.text = "正在跟踪目标"
             }
         }
@@ -335,33 +339,30 @@ final class CameraViewController: UIViewController {
     // MARK: - Touch Handling
     
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
-        guard currentMode == .objectTracking,
-              let touch = touches.first,
-              let previewLayer = self.previewLayer
-        else { return }
-        
-        // 1. 屏幕坐标 -> 预览层坐标
-        let locationInView = touch.location(in: view)
-        let locationInLayer = previewLayer.convert(locationInView, from: view.layer)
-        
-        // 2. 在预览层坐标系里构造一个 100x100 的矩形
+        guard currentMode == .objectTracking, let touch = touches.first else { return }
+
+        let location = touch.location(in: view)
+
+        // 在视图坐标系中，以点击点为中心创建一个 100x100 的正方形框
         let boxSize: CGFloat = 100
-        let layerRect = CGRect(
-            x: locationInLayer.x - boxSize / 2,
-            y: locationInLayer.y - boxSize / 2,
+        let boxRectInView = CGRect(
+            x: location.x - boxSize / 2,
+            y: location.y - boxSize / 2,
             width: boxSize,
             height: boxSize
         )
-        
-        // 3. 预览层坐标 -> metadata 归一化坐标（0~1，自动考虑裁剪/镜像）
-        let normalizedRect = previewLayer.metadataOutputRectConverted(fromLayerRect: layerRect)
-        
-        // 4. 用 metadata 坐标初始化 tracker
-        objectTracker.initializeTracking(with: normalizedRect)
-        
-        // 5. 画框时再转回屏幕坐标
-        let displayRect = previewLayer.layerRectConverted(fromMetadataOutputRect: normalizedRect)
-        trackingView.updateTrackingRect(displayRect, color: .green, isDashed: false, isNormalized: false)
+
+        // 通过 previewLayer 转成 0~1 的元数据坐标，供 Vision 跟踪使用
+        let metadataRect = previewLayer.metadataOutputRectConverted(fromLayerRect: boxRectInView)
+
+        // 用元数据坐标启动目标跟踪
+        objectTracker.initializeTracking(with: metadataRect)
+
+        // 在屏幕上立即画出用户选中的正方形框（这里使用的是视图坐标，所以 isNormalized = false）
+        trackingView.updateTrackingRect(boxRectInView,
+                                        color: .green,
+                                        isDashed: false,
+                                        isNormalized: false)
         gestureLabel.text = "目标已选择，开始跟踪"
     }
 
