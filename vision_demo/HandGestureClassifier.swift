@@ -119,9 +119,9 @@ struct HandGestureClassifier {
             // 基于Palm手势ringToMiddleRatio mean≈0.91
             static let ringToMiddleRatioMin: CGFloat = 0.80
             // 基于Palm手势littleToMiddleRatio mean≈0.77
-            static let littleToMiddleRatioMin: CGFloat = 0.70
-            // 手掌张开四指都直
-            static let minStraightCount: Int = 4
+            static let littleToMiddleRatioMin: CGFloat = 0.60   // 放宽小指长度要求
+            // 手掌张开至少3根手指伸直
+            static let minStraightCount: Int = 3                // 至少 3 根手指伸直即可
             static let minScore: Int = 4
         }
 
@@ -438,21 +438,20 @@ struct HandGestureClassifier {
             scorePalm += 1  // 食指和中指长度接近
         }
         
-        // 关键区分点：手掌要求无名指和小指必须伸直（长）
+        // 关键区分点：手掌要求无名指和小指尽量伸直
         if features.ringToMiddleRatio >= Constants.PalmThreshold.ringToMiddleRatioMin {
-            scorePalm += 2  // 无名指比较长
+            scorePalm += 2   // 无名指比较长（加强权重）
         } else {
-            scorePalm -= 2  // 无名指太短，扣分
+            scorePalm -= 1   // 不再强扣 2 分，只扣 1 分
         }
         
         if features.littleToMiddleRatio >= Constants.PalmThreshold.littleToMiddleRatioMin {
-            scorePalm += 2  // 小指比较长
-        } else {
-            scorePalm -= 2  // 小指太短，扣分
+            // 小指够长就加一点分，不够长也不扣分
+            scorePalm += 1
         }
         
         if straightCount >= Constants.PalmThreshold.minStraightCount {
-            scorePalm += 1  // 四指都直
+            scorePalm += 1   // 至少 3 根手指伸直
         }
 
         // 拳头打分
@@ -490,6 +489,12 @@ struct HandGestureClassifier {
         }
         if features.gapThumbIndex <= Constants.IndexFingerThreshold.thumbIndexGapMax {
             scoreIndexFinger += 1  // 拇指食指间距较小
+        }
+
+        // 额外约束：如果伸直的手指超过 1 根，就逐步降低"食指手势"的置信度
+        if straightCount > Constants.IndexFingerThreshold.exactStraightCount {
+            scoreIndexFinger -= (straightCount - Constants.IndexFingerThreshold.exactStraightCount)
+            // 例如 straightCount = 3 时，额外扣 2 分
         }
 
         // 额外区分逻辑：如果几何特征明显偏向 OK，就稍微提升 OK，压低 Palm
