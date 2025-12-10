@@ -250,16 +250,19 @@ final class CameraViewController: UIViewController {
     private func setupDetectors() {
         // 配置人脸检测回调
         faceDetector.onFaceDetected = { [weak self] rect in
+            // print("Face detected at: \(rect)")
             DispatchQueue.main.async {
+                // 人脸跟随使用黄色虚线框
                 self?.trackingView.updateTrackingRect(rect, color: .yellow, isDashed: true)
                 self?.gestureLabel.text = "检测到人脸"
             }
         }
         
         faceDetector.onNoFaceDetected = { [weak self] in
+            // print("No face detected")
             DispatchQueue.main.async {
                 // 未检测到人脸时，显示红色中心框（搜索状态）
-                let centerRect = CGRect(x: 0.25, y: 0.35, width: 0.5, height: 0.3) // 屏幕中心区域
+                let centerRect = CGRect(x: 0.25, y: 0.35, width: 0.5, height: 0.3)
                 self?.trackingView.updateTrackingRect(centerRect, color: .red, isDashed: false)
                 self?.gestureLabel.text = "未检测到人脸"
             }
@@ -283,10 +286,12 @@ final class CameraViewController: UIViewController {
     
     @objc private func modeChanged(_ sender: UISegmentedControl) {
         guard let mode = DetectionMode(rawValue: sender.selectedSegmentIndex) else { return }
+        print("Mode Changed to: \(mode)")
         currentMode = mode
     }
     
     private func updateUIForMode() {
+        print("Updating UI for mode: \(currentMode)")
         trackingView.clear()
         
         switch currentMode {
@@ -301,6 +306,7 @@ final class CameraViewController: UIViewController {
             gestureLabel.isHidden = false
             debugLabel.isHidden = true
             if isTuningModeEnabled { tuningPanelStackView.isHidden = true }
+            print("Starting face detector...")
             faceDetector.start()
             
         case .objectTracking:
@@ -545,8 +551,12 @@ final class CameraViewController: UIViewController {
             }
             
         case .faceTracking:
-            // 前置摄像头通常需要 .upMirrored (与手势识别保持一致)
-            faceDetector.detectFaces(in: pixelBuffer, orientation: .upMirrored)
+            // 尝试使用默认方向（不指定），或者尝试不同的方向
+            // 如果 videoOrientation = .portrait 且 mirrored，理论上是 .upMirrored
+            // 但如果一直检测不到，可能是方向问题。
+            // 让我们先打印一下执行频率
+             if Int.random(in: 0...60) == 0 { print("Processing face detection frame...") }
+            faceDetector.detectFaces(in: pixelBuffer, orientation: .leftMirrored)
             
         case .objectTracking:
             objectTracker.trackObject(in: pixelBuffer)
