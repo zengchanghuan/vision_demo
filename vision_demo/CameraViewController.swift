@@ -251,13 +251,13 @@ final class CameraViewController: UIViewController {
     
     private func setupDetectors() {
         // 配置人脸检测回调
-        faceDetector.onFaceDetected = { [weak self] rect in
+        faceDetector.onFaceDetected = { [weak self] normalizedRect in
             guard let self = self else { return }
-            // print("Face detected at: \(rect)")
+            // print("Face detected at: \(normalizedRect)")
             DispatchQueue.main.async {
                 // 使用 previewLayer 将归一化坐标转换为视图坐标
                 // 这能自动处理 videoGravity (如 .resizeAspectFill) 带来的裁剪和缩放偏移
-                let convertedRect = self.previewLayer.layerRectConverted(fromMetadataOutputRect: rect)
+                let convertedRect = self.previewLayer.layerRectConverted(fromMetadataOutputRect: normalizedRect)
                 
                 // 人脸跟随使用黄色虚线框
                 self.trackingView.updateTrackingRect(convertedRect, color: .yellow, isDashed: true, isNormalized: false)
@@ -525,10 +525,10 @@ final class CameraViewController: UIViewController {
             if conn.isVideoOrientationSupported {
                 conn.videoOrientation = .portrait
             }
-            // 前置摄像头镜像
-            if conn.isVideoMirroringSupported {
-                conn.isVideoMirrored = true
-            }
+            // 不要在这里设置 isVideoMirrored，让 Vision 处理原始数据
+            // if conn.isVideoMirroringSupported {
+            //    conn.isVideoMirrored = true
+            // }
         }
 
         captureSession.commitConfiguration()
@@ -558,9 +558,9 @@ final class CameraViewController: UIViewController {
             }
             
         case .faceTracking:
-            // 使用 .upMirrored，配合正确的坐标转换
+            // 使用 .leftMirrored 方向，适配前置摄像头竖屏的常见方向
              if Int.random(in: 0...60) == 0 { print("Processing face detection frame...") }
-            faceDetector.detectFaces(in: pixelBuffer, orientation: .upMirrored)
+            faceDetector.detectFaces(in: pixelBuffer, orientation: .leftMirrored)
             
         case .objectTracking:
             objectTracker.trackObject(in: pixelBuffer)
