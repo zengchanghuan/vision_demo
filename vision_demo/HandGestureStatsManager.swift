@@ -8,6 +8,7 @@ final class HandGestureStatsManager {
 
     /// 单个样本
     struct Sample {
+        let timestamp: Date
         let groundTruth: HandGestureType    // 真实手势
         let predicted: HandGestureType      // 预测手势
         let features: HandGestureClassifier.HandGestureFeatureVector
@@ -40,7 +41,7 @@ final class HandGestureStatsManager {
     func recordSample(groundTruth: HandGestureType,
                       predicted: HandGestureType,
                       features: HandGestureClassifier.HandGestureFeatureVector) {
-        let sample = Sample(groundTruth: groundTruth, predicted: predicted, features: features)
+        let sample = Sample(timestamp: Date(), groundTruth: groundTruth, predicted: predicted, features: features)
         samples.append(sample)
 
         // 更新混淆矩阵
@@ -136,6 +137,228 @@ final class HandGestureStatsManager {
     func reset() {
         samples.removeAll()
         confusionMatrix.removeAll()
+    }
+    
+    // MARK: - JSONL 持久化
+    
+    /// 获取数据存储目录
+    private func getDataDirectory() -> URL? {
+        guard let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let dataDir = documentsPath.appendingPathComponent("gesture_stats")
+        
+        // 确保目录存在
+        if !FileManager.default.fileExists(atPath: dataDir.path) {
+            try? FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+        }
+        
+        return dataDir
+    }
+    
+    /// 将当前样本保存为 JSONL 格式
+    /// - Returns: 保存的文件路径，如果失败返回 nil
+    @discardableResult
+    func saveToJSONL() -> URL? {
+        guard !samples.isEmpty, let dataDir = getDataDirectory() else {
+            print("无法保存：没有样本或无法创建目录")
+            return nil
+        }
+        
+        // 生成文件名：samples_YYYYMMDD_HHmmss.jsonl
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let filename = "samples_\(timestamp).jsonl"
+        let fileURL = dataDir.appendingPathComponent(filename)
+        
+        var lines: [String] = []
+        let isoFormatter = ISO8601DateFormatter()
+        
+        for sample in samples {
+            var dict: [String: Any] = [
+                "timestamp": isoFormatter.string(from: sample.timestamp),
+                "groundTruth": sample.groundTruth.rawValue,
+                "predicted": sample.predicted.rawValue,
+                "features": [
+                    "lenThumb": sample.features.lenThumb,
+                    "lenIndex": sample.features.lenIndex,
+                    "lenMiddle": sample.features.lenMiddle,
+                    "lenRing": sample.features.lenRing,
+                    "lenLittle": sample.features.lenLittle,
+                    "thumbIndexGap": sample.features.thumbIndexGap,
+                    "indexMiddleGap": sample.features.indexMiddleGap,
+                    "middleRingGap": sample.features.middleRingGap,
+                    "ringLittleGap": sample.features.ringLittleGap,
+                    "handWidth": sample.features.handWidth,
+                    "lenThumbNorm": sample.features.lenThumbNorm,
+                    "lenIndexNorm": sample.features.lenIndexNorm,
+                    "lenMiddleNorm": sample.features.lenMiddleNorm,
+                    "lenRingNorm": sample.features.lenRingNorm,
+                    "lenLittleNorm": sample.features.lenLittleNorm,
+                    "thumbIndexGapNorm": sample.features.thumbIndexGapNorm,
+                    "indexMiddleGapNorm": sample.features.indexMiddleGapNorm,
+                    "middleRingGapNorm": sample.features.middleRingGapNorm,
+                    "ringLittleGapNorm": sample.features.ringLittleGapNorm,
+                    "straightCount": sample.features.straightCount,
+                    "wristToIndexTip": sample.features.wristToIndexTip,
+                    "wristToLittleTip": sample.features.wristToLittleTip
+                ]
+            ]
+            
+            if let jsonData = try? JSONSerialization.data(withJSONObject: dict),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                lines.append(jsonString)
+            }
+        }
+        
+        let content = lines.joined(separator: "\n")
+        
+        do {
+            try content.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("成功保存 \(samples.count) 个样本到: \(fileURL.path)")
+            return fileURL
+        } catch {
+            print("保存失败: \(error)")
+            return nil
+        }
+    }
+    
+    /// 从 JSONL 文件加载样本
+    /// - Parameter fileURL: JSONL 文件的 URL
+    /// - Returns: 成功加载的样本数量
+    @discardableResult
+    func loadFromJSONL(fileURL: URL) -> Int {
+        guard let content = try? String(contentsOf: fileURL, encoding: .utf8) else {
+            print("无法读取文件: \(fileURL.path)")
+            return 0
+        }
+        
+        let lines = content.components(separatedBy: .newlines).filter { !$0.isEmpty }
+        var loadedCount = 0
+        let isoFormatter = ISO8601DateFormatter()
+        
+        for line in lines {
+            guard let jsonData = line.data(using: .utf8),
+                  let dict = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+                  let timestampStr = dict["timestamp"] as? String,
+                  let timestamp = isoFormatter.date(from: timestampStr),
+                  let groundTruthStr = dict["groundTruth"] as? String,
+                  let predictedStr = dict["predicted"] as? String,
+                  let featuresDict = dict["features"] as? [String: Any] else {
+                continue
+            }
+            
+            // 解析手势类型
+            let groundTruth = HandGestureType(rawValue: groundTruthStr) ?? .unknown
+            let predicted = HandGestureType(rawValue: predictedStr) ?? .unknown
+            
+            // 解析特征向量
+            guard let lenThumb = featuresDict["lenThumb"] as? Double,
+                  let lenIndex = featuresDict["lenIndex"] as? Double,
+                  let lenMiddle = featuresDict["lenMiddle"] as? Double,
+                  let lenRing = featuresDict["lenRing"] as? Double,
+                  let lenLittle = featuresDict["lenLittle"] as? Double,
+                  let thumbIndexGap = featuresDict["thumbIndexGap"] as? Double,
+                  let indexMiddleGap = featuresDict["indexMiddleGap"] as? Double,
+                  let middleRingGap = featuresDict["middleRingGap"] as? Double,
+                  let ringLittleGap = featuresDict["ringLittleGap"] as? Double,
+                  let handWidth = featuresDict["handWidth"] as? Double,
+                  let lenThumbNorm = featuresDict["lenThumbNorm"] as? Double,
+                  let lenIndexNorm = featuresDict["lenIndexNorm"] as? Double,
+                  let lenMiddleNorm = featuresDict["lenMiddleNorm"] as? Double,
+                  let lenRingNorm = featuresDict["lenRingNorm"] as? Double,
+                  let lenLittleNorm = featuresDict["lenLittleNorm"] as? Double,
+                  let thumbIndexGapNorm = featuresDict["thumbIndexGapNorm"] as? Double,
+                  let indexMiddleGapNorm = featuresDict["indexMiddleGapNorm"] as? Double,
+                  let middleRingGapNorm = featuresDict["middleRingGapNorm"] as? Double,
+                  let ringLittleGapNorm = featuresDict["ringLittleGapNorm"] as? Double,
+                  let straightCount = featuresDict["straightCount"] as? Int,
+                  let wristToIndexTip = featuresDict["wristToIndexTip"] as? Double,
+                  let wristToLittleTip = featuresDict["wristToLittleTip"] as? Double else {
+                continue
+            }
+            
+            let features = HandGestureClassifier.HandGestureFeatureVector(
+                lenThumb: CGFloat(lenThumb),
+                lenIndex: CGFloat(lenIndex),
+                lenMiddle: CGFloat(lenMiddle),
+                lenRing: CGFloat(lenRing),
+                lenLittle: CGFloat(lenLittle),
+                thumbIndexGap: CGFloat(thumbIndexGap),
+                indexMiddleGap: CGFloat(indexMiddleGap),
+                middleRingGap: CGFloat(middleRingGap),
+                ringLittleGap: CGFloat(ringLittleGap),
+                handWidth: CGFloat(handWidth),
+                lenThumbNorm: CGFloat(lenThumbNorm),
+                lenIndexNorm: CGFloat(lenIndexNorm),
+                lenMiddleNorm: CGFloat(lenMiddleNorm),
+                lenRingNorm: CGFloat(lenRingNorm),
+                lenLittleNorm: CGFloat(lenLittleNorm),
+                thumbIndexGapNorm: CGFloat(thumbIndexGapNorm),
+                indexMiddleGapNorm: CGFloat(indexMiddleGapNorm),
+                middleRingGapNorm: CGFloat(middleRingGapNorm),
+                ringLittleGapNorm: CGFloat(ringLittleGapNorm),
+                straightCount: straightCount,
+                wristToIndexTip: CGFloat(wristToIndexTip),
+                wristToLittleTip: CGFloat(wristToLittleTip)
+            )
+            
+            let sample = Sample(timestamp: timestamp, groundTruth: groundTruth, predicted: predicted, features: features)
+            samples.append(sample)
+            
+            // 更新混淆矩阵
+            var predictions = confusionMatrix[groundTruth] ?? [:]
+            predictions[predicted] = (predictions[predicted] ?? 0) + 1
+            confusionMatrix[groundTruth] = predictions
+            
+            loadedCount += 1
+        }
+        
+        print("成功从 \(fileURL.lastPathComponent) 加载 \(loadedCount) 个样本")
+        return loadedCount
+    }
+    
+    /// 列出所有保存的 JSONL 文件
+    /// - Returns: 文件 URL 数组
+    func listSavedFiles() -> [URL] {
+        guard let dataDir = getDataDirectory() else {
+            return []
+        }
+        
+        do {
+            let files = try FileManager.default.contentsOfDirectory(at: dataDir, includingPropertiesForKeys: nil)
+            return files.filter { $0.pathExtension == "jsonl" }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+        } catch {
+            print("列出文件失败: \(error)")
+            return []
+        }
+    }
+    
+    /// 导出所有统计信息为汇总报告
+    /// - Returns: 报告文件的 URL，如果失败返回 nil
+    @discardableResult
+    func exportAllStats() -> URL? {
+        guard let dataDir = getDataDirectory() else {
+            return nil
+        }
+        
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+        let timestamp = dateFormatter.string(from: Date())
+        let filename = "stats_report_\(timestamp).txt"
+        let fileURL = dataDir.appendingPathComponent(filename)
+        
+        let report = debugSummaryText()
+        
+        do {
+            try report.write(to: fileURL, atomically: true, encoding: .utf8)
+            print("成功导出统计报告到: \(fileURL.path)")
+            return fileURL
+        } catch {
+            print("导出统计报告失败: \(error)")
+            return nil
+        }
     }
 
     // MARK: - 私有方法
