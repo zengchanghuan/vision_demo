@@ -699,7 +699,7 @@ final class CameraViewController: UIViewController {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
         switch currentMode {
-        case .handGesture:
+        case .handGesture, .calibration:
             let handler = VNImageRequestHandler(
                 cvPixelBuffer: pixelBuffer,
                 orientation: .upMirrored,    // 前置 + 镜像
