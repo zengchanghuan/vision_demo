@@ -49,11 +49,12 @@ class FaceDetector {
 
     /// 在视频帧中执行人脸检测
     /// - Parameter pixelBuffer: 视频帧的像素缓冲区
-    func detectFaces(in pixelBuffer: CVPixelBuffer) {
+    /// - Parameter orientation: 图像方向
+    func detectFaces(in pixelBuffer: CVPixelBuffer, orientation: CGImagePropertyOrientation = .up) {
         guard isEnabled, let request = faceDetectionRequest else { return }
-
-        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, options: [:])
-
+        
+        let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer, orientation: orientation, options: [:])
+        
         do {
             try handler.perform([request])
         } catch {

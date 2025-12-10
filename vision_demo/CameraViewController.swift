@@ -258,7 +258,9 @@ final class CameraViewController: UIViewController {
         
         faceDetector.onNoFaceDetected = { [weak self] in
             DispatchQueue.main.async {
-                self?.trackingView.clear()
+                // 未检测到人脸时，显示红色中心框（搜索状态）
+                let centerRect = CGRect(x: 0.25, y: 0.35, width: 0.5, height: 0.3) // 屏幕中心区域
+                self?.trackingView.updateTrackingRect(centerRect, color: .red, isDashed: false)
                 self?.gestureLabel.text = "未检测到人脸"
             }
         }
@@ -543,7 +545,8 @@ final class CameraViewController: UIViewController {
             }
             
         case .faceTracking:
-            faceDetector.detectFaces(in: pixelBuffer)
+            // 前置摄像头通常需要 .upMirrored (与手势识别保持一致)
+            faceDetector.detectFaces(in: pixelBuffer, orientation: .upMirrored)
             
         case .objectTracking:
             objectTracker.trackObject(in: pixelBuffer)
