@@ -252,11 +252,16 @@ final class CameraViewController: UIViewController {
     private func setupDetectors() {
         // 配置人脸检测回调
         faceDetector.onFaceDetected = { [weak self] rect in
+            guard let self = self else { return }
             // print("Face detected at: \(rect)")
             DispatchQueue.main.async {
+                // 使用 previewLayer 将归一化坐标转换为视图坐标
+                // 这能自动处理 videoGravity (如 .resizeAspectFill) 带来的裁剪和缩放偏移
+                let convertedRect = self.previewLayer.layerRectConverted(fromMetadataOutputRect: rect)
+                
                 // 人脸跟随使用黄色虚线框
-                self?.trackingView.updateTrackingRect(rect, color: .yellow, isDashed: true)
-                self?.gestureLabel.text = "检测到人脸"
+                self.trackingView.updateTrackingRect(convertedRect, color: .yellow, isDashed: true, isNormalized: false)
+                self.gestureLabel.text = "检测到人脸"
             }
         }
         
@@ -553,12 +558,9 @@ final class CameraViewController: UIViewController {
             }
             
         case .faceTracking:
-            // 尝试使用默认方向（不指定），或者尝试不同的方向
-            // 如果 videoOrientation = .portrait 且 mirrored，理论上是 .upMirrored
-            // 但如果一直检测不到，可能是方向问题。
-            // 让我们先打印一下执行频率
+            // 使用 .upMirrored，配合正确的坐标转换
              if Int.random(in: 0...60) == 0 { print("Processing face detection frame...") }
-            faceDetector.detectFaces(in: pixelBuffer, orientation: .leftMirrored)
+            faceDetector.detectFaces(in: pixelBuffer, orientation: .upMirrored)
             
         case .objectTracking:
             objectTracker.trackObject(in: pixelBuffer)

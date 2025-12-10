@@ -15,20 +15,26 @@ class TrackingView: UIView {
     }
     
     /// 更新跟踪框
-    /// - Parameter rect: 归一化坐标的矩形 (0~1)
+    /// - Parameter rect: 矩形框
     /// - Parameter color: 边框颜色
     /// - Parameter isDashed: 是否使用虚线
-    func updateTrackingRect(_ rect: CGRect, color: UIColor = .green, isDashed: Bool = false) {
+    /// - Parameter isNormalized: 是否是归一化坐标 (0~1)。如果是 true，会根据视图大小转换；如果是 false，直接使用 rect。
+    func updateTrackingRect(_ rect: CGRect, color: UIColor = .green, isDashed: Bool = false, isNormalized: Bool = true) {
         // 移除旧的层
         trackingLayer?.removeFromSuperlayer()
         
         // 转换坐标
-        let convertedRect = CGRect(
-            x: rect.minX * bounds.width,
-            y: rect.minY * bounds.height,
-            width: rect.width * bounds.width,
-            height: rect.height * bounds.height
-        )
+        let convertedRect: CGRect
+        if isNormalized {
+            convertedRect = CGRect(
+                x: rect.minX * bounds.width,
+                y: rect.minY * bounds.height,
+                width: rect.width * bounds.width,
+                height: rect.height * bounds.height
+            )
+        } else {
+            convertedRect = rect
+        }
         
         // 创建路径
         let path = UIBezierPath(rect: convertedRect)
