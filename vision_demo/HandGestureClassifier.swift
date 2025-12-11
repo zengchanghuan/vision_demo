@@ -80,7 +80,7 @@ struct HandGestureClassifier {
         /// V 手势阈值（优化远距离识别 - 基于比例特征）
         struct VThreshold {
             // V手势核心特征：食指中指间距（远距离最可靠的特征）
-            static let indexMiddleGapMin: CGFloat = 0.025  // 降低阈值以适应远距离
+            static let indexMiddleGapMin: CGFloat = 0.035  // 提高阈值：严格避免误判食指/拳头
             static let indexMiddleGapMax: CGFloat = 0.25   // 上限放宽
             
             // V手势比例特征：无名指和小指必须弯曲（相对于中指）
@@ -187,11 +187,11 @@ struct HandGestureClassifier {
         
         /// 每种手势的最低分数阈值（低于此阈值返回 unknown）
         struct GestureThreshold {
-            static let vSign: Int = 4      // 降低V手势的阈值，便于远距离识别
-            static let okSign: Int = 4
+            static let vSign: Int = 6      // 提高阈值：严格避免误判食指/拳头
+            static let okSign: Int = 3  // 降低阈值：提高OK识别率
             static let palm: Int = 5
-            static let fist: Int = 5
-            static let indexFinger: Int = 5
+            static let fist: Int = 2  // 进一步降低阈值：大幅提高拳头识别率
+            static let indexFinger: Int = 4  // 降低食指阈值，便于识别
         }
         
         /// 每种手势与第二高分的最小差距（低于此差距说明不够稳定，返回 unknown）
@@ -507,23 +507,32 @@ struct HandGestureClassifier {
             scoreV -= 3  // 拇指食指靠近，更像拳头或OK
         }
         
-        // 6. straightCount作为辅助（不作为主要特征）
-        if straightCount <= Constants.VThreshold.maxStraightCount {
-            scoreV += 1  // 轻权重：通常2根手指伸直
+        // 6. 核心约束：straightCount检查（V手势必须是2根手指伸直）
+        // 严格约束：straightCount必须是2，否则大幅减分
+        if straightCount == 2 {
+            scoreV += 4  // 正好2根手指伸直是V手势的核心特征（从+3提高到+4）
+        } else if straightCount == 1 {
+            // 只有1根手指伸直：无论间距如何，都大幅减分（更可能是食指）
+            scoreV -= 5  // 强力减分：只有1根手指伸直，不可能是V手势
+        } else if straightCount == 0 {
+            // 没有手指伸直：无论间距如何，都大幅减分（更可能是拳头）
+            scoreV -= 7  // 强力减分：没有手指伸直，不可能是V手势
+        } else if straightCount >= 3 {
+            scoreV -= 4  // 太多手指伸直，更可能是手掌（从-2改为-4）
         }
 
         // OK手势打分
         if features.gapThumbIndex <= Constants.OKThreshold.thumbIndexGapMax {
-            // 拇指食指靠得很近，更像 OK
-            scoreOK += 2
+            // 拇指食指靠得很近，更像 OK（核心特征，增强权重）
+            scoreOK += 3  // 从+2提高到+3
         } else if features.gapThumbIndex >= Constants.PalmThreshold.thumbIndexGapMin {
             // 拇指食指间距已经接近/超过手掌区间，更像手掌
             scoreOK -= 2
         }
         
         if features.gapIndexMiddle >= Constants.OKThreshold.indexMiddleGapMin {
-            // 食指弯成圈后和中指间距较大
-            scoreOK += 2
+            // 食指弯成圈后和中指间距较大（核心特征）
+            scoreOK += 3  // 从+2提高到+3
         } else if features.gapIndexMiddle <= Constants.PalmThreshold.indexMiddleGapMax {
             // 食指中指间距非常小，更像手掌
             scoreOK -= 1
@@ -593,42 +602,46 @@ struct HandGestureClassifier {
 
         // 拳头打分 + V手势强制减分
         if straightCount <= Constants.FistThreshold.maxStraightCount {
-            scoreFist += 2  // 没有手指伸直
+            scoreFist += 4  // 没有手指伸直（核心特征，从+3提高到+4）
+        } else if straightCount >= 1 {
+            scoreFist -= (straightCount * 2)  // 每有一根手指伸直就扣2分
         }
         if features.gapThumbIndex <= Constants.FistThreshold.thumbIndexGapMax {
-            scoreFist += 2  // 拇指食指间距很小
+            scoreFist += 3  // 拇指食指间距很小（核心特征，从+2提高到+3）
         }
         if features.gapIndexMiddle <= Constants.FistThreshold.indexMiddleGapMax {
-            scoreFist += 1  // 食指中指间距很小
+            scoreFist += 2  // 食指中指间距很小（从+1提高到+2）
         }
         if features.indexToMiddleRatio <= Constants.FistThreshold.indexToMiddleRatioMax {
-            scoreFist += 1  // 食指相对中指变短（都弯曲）
+            scoreFist += 2  // 食指相对中指变短（都弯曲，从+1提高到+2）
         }
         if features.ringToMiddleRatio <= Constants.FistThreshold.ringToMiddleRatioMax {
-            scoreFist += 1  // 无名指相对中指变短
+            scoreFist += 2  // 无名指相对中指变短（从+1提高到+2）
         }
         if features.littleToMiddleRatio <= Constants.FistThreshold.littleToMiddleRatioMax {
-            scoreFist += 1  // 小指相对中指变短
+            scoreFist += 2  // 小指相对中指变短（从+1提高到+2）
         }
         
         // 【V手势强制减分】如果特征明显偏向V手势，大幅降低Fist得分
         // 注意：minFingerLen 已在函数开头定义
         
         // 核心V特征：后两指弯曲 + 食指中指分开
+        // 只有当间距明显大时才减分，避免过度压制拳头
         if features.ringToMiddleRatio < 0.8 && 
            features.littleToMiddleRatio < 0.8 && 
-           features.gapIndexMiddle > Constants.FistThreshold.vLikeGapThreshold {
-            scoreFist -= 4  // 强力减分：这是明显的V手势特征
+           features.gapIndexMiddle > Constants.FistThreshold.vLikeStrongGapThreshold {
+            scoreFist -= 3  // 减分从-4改为-3，且提高阈值到0.03
         }
         
-        // 辅助特征：食指中指间距很大
-        if features.gapIndexMiddle > Constants.FistThreshold.vLikeStrongGapThreshold {
-            scoreFist -= 2  // 额外减分：间距太大不像拳头
-        }
+        // 辅助特征：食指中指间距很大（已在上面的V特征检测中处理，这里移除重复减分）
+        // 移除重复减分，避免过度压制拳头手势
+        // if features.gapIndexMiddle > Constants.FistThreshold.vLikeStrongGapThreshold {
+        //     scoreFist -= 2
+        // }
         
         // 辅助特征：手指长度足够
         if minFingerLen > Constants.FistThreshold.vLikeMinFingerLength {
-            scoreFist -= 2  // 额外减分：手指太长不像拳头
+            scoreFist -= 1  // 减分从-2改为-1，避免过度压制
         }
 
         // 食指手势打分
@@ -652,6 +665,12 @@ struct HandGestureClassifier {
         if straightCount > Constants.IndexFingerThreshold.exactStraightCount {
             scoreIndexFinger -= (straightCount - Constants.IndexFingerThreshold.exactStraightCount)
             // 例如 straightCount = 3 时，额外扣 2 分
+        }
+        
+        // 【强化食指识别】当straightCount=1时，如果间距小，给食指额外加分
+        // 这确保食指手势不会被V手势误判
+        if straightCount == 1 && features.gapIndexMiddle < 0.030 {
+            scoreIndexFinger += 2  // 间距小且只有1根手指，明显是食指手势
         }
 
         // 额外区分逻辑：如果几何特征明显偏向 OK，就稍微提升 OK，压低 Palm
