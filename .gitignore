@@ -1,0 +1,32 @@
+# Xcode build output
+build/
+*.xcbuilddata
+*.xcuserdata
+*.xcworkspace
+DerivedData/
+
+# Analysis results (generated files)
+live_analysis/
+logs/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+venv/
+env/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
