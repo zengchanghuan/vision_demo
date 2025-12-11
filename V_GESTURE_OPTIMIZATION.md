@@ -328,3 +328,4 @@ if features.ringToMiddleRatio < 0.80 &&
 - 手部大小保护：handSize < 0.08 时拒绝识别
 
 **预期效果：** 远距离V手势识别率提升 70%+，同时不影响其他手势的准确率。
+

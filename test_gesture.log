@@ -8,3 +8,4 @@
 [HandGestureDebug] 拳头 ✓ | lenIdx:0.042 lenMid:0.048 lenRing:0.051 lenLit:0.062 | gapIdxMid:0.015 gapThumbIdx:0.045 | ratio idx/mid:0.87 ring/mid:1.06 lit/mid:1.29 | score V/OK/Palm/Fist/Idx = -3/2/1/6/1
 [HandGestureDebug] 拳头 ✓ | lenIdx:0.038 lenMid:0.045 lenRing:0.048 lenLit:0.058 | gapIdxMid:0.012 gapThumbIdx:0.041 | ratio idx/mid:0.84 ring/mid:1.06 lit/mid:1.28 | score V/OK/Palm/Fist/Idx = -4/2/1/6/0
 [HandGestureDebug] V手势 ✓ | lenIdx:0.125 lenMid:0.132 lenRing:0.075 lenLit:0.068 | gapIdxMid:0.075 gapThumbIdx:0.215 | ratio idx/mid:0.94 ring/mid:0.56 lit/mid:0.51 | score V/OK/Palm/Fist/Idx = 8/0/2/-2/0
+

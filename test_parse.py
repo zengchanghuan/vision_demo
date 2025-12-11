@@ -83,3 +83,4 @@ if __name__ == "__main__":
     log_file = sys.argv[1]
     success = test_parse_log(log_file)
     sys.exit(0 if success else 1)
+
